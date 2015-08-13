@@ -98,7 +98,7 @@ def getYahooFinanceData(symbol):
     tag = soup.find(text='Industry:')
     industry = getData(tag, 'a')
 
-    return name, marketCap, sector, industry
+    return name, sector, industry, marketCap
 
 #-------------------------------------------------------------------
 # Get name, sector, industry and market cap for a list of companies
@@ -112,7 +112,7 @@ if __name__ == '__main__':
     for line in f:
         data = line.split(',')
         symbol = data[1].strip()
-        name, marketCap, sector, industry = getYahooFinanceData(symbol)
+        name, sector, industry, marketCap = getYahooFinanceData(symbol)
         
         print str(i) + ': ' + originalSymbol  + '|' + name + '|' + sector + '|' + industry + '|' + marketCap
         out.write(originalSymbol  + '|' + name + '|' + sector + '|' + industry + '|' + marketCap + '\n')

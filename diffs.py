@@ -60,6 +60,15 @@ class Portfolio:
             f.write(str(position) + '\n')
         f.close()
 
+    # Add positions to the portfolio
+    def addPositions(self, positions):
+        self.positions.extend(positions)
+            
+    # Remove positions from portfolio
+    def removePositions(self, positions):
+        for position in positions:
+            self.positions.pop(position)
+
     # Read from Excel file
     def readExcel(self, filename):
         self.positions = []
@@ -194,6 +203,102 @@ class Portfolio:
                 position = Position(*values)
                 self.positions.append(position)
 
+    #------------------------------------------------------------------------
+    # Update portfolio based on diffs or a sample portfolio for a given date
+    #------------------------------------------------------------------------
+    def update(self, asofDate):
+        # Read diffs file
+        positionsNew = readDiffs(market + '-new-' + asofDate + '.csv')
+        f = open(market + '-new-' + asofDate + '.csv')
+        positionsNew = []
+        positionsRemoved = []
+        for line in f:
+            data = line.strip().split(',')
+            action = data[0]
+            direction = data[1]
+            symbol = data[2]
+            position = Position(direction, symbol)
+            if action == 'New':
+                positionsNew.append(position)
+            else:
+                positionsRemoved.append(position)
+
+        SAMPLE = True
+        if SAMPLE:
+            # Add a number of positions from the sample file (created by create-sample.py)
+            samplePortfolio = Portfolio()
+            samplePortfolio.readCsv(market + '-sample.csv')
+            sectors = readSectorFile()
+            NUM_DAILY_POSITIONS = 2
+            portfolio = Portfolio()
+            portfolio.readCsv(market + '-portfolio.csv')
+            numSamplePositions = min(len(samplePortfolio.positions), NUM_DAILY_POSITIONS)
+            if numSamplePositions > 0:
+                j = 0
+                positionIndex = 0
+                while j < numSamplePositions and positionIndex < len(samplePortfolio.positions):
+                    samplePosition = samplePortfolio.positions[positionIndex]
+                    if not samplePosition in portfolio.positions:
+                        samplePosition.entryDate = asofDate
+                        portfolio.positions.append(samplePosition)
+                        #del samplePortfolio.positions[j]
+                        j += 1
+                    positionIndex += 1
+
+                showStats(portfolio, sectors)
+                samplePortfolio.writeCsv(market + '-sample.csv')
+                portfolio.writeCsv(market + '-portfolio.csv')
+        else:
+            # Add all new positions to global portfolio, if not already there
+            f = open(market + '-portfolio.csv', 'a')
+            for p in positionsNew:
+                p.entryDate = asofDate
+                if p in portfolio.positions:
+                    print 'Skipping', str(p)
+                else:
+                    print 'Adding', str(p)
+                    f.write(str(p) + '\n')
+                    # Also update sectors file
+                    s = open('allsectors.txt', 'a')
+                    name, sector, industry, marketCap = getYahooFinanceData(p.symbol)
+                    marketCapNum = getMarketCapNum(marketCap)
+                    print p.symbol, name, sector, industry, marketCap, marketCapNum
+                    s.write(p.symbol + ',' + sector + ',' + str(marketCapNum) + '\n')
+                    s.close()
+            f.close()
+
+        # Set exit date for removed positions
+        portfolio = Portfolio()
+        portfolio.readCsv(market + '-portfolio.csv')
+        newPortfolio = Portfolio()
+        for position in portfolio.positions:
+            if position in positionsRemoved:
+                position.exitDate = asofDate
+                print 'Set exitDate of', str(position)
+            newPortfolio.positions.append(position)
+        newPortfolio.writeCsv(market + '-portfolio.csv')
+        newPortfolio.writeCsv(market + '-portfolio-' + asofDate + '.csv')
+
+
+#--------------------------------------------------
+# Read new and removed positions from a diffs file
+#--------------------------------------------------
+def readDiffs(filename):
+    f = open(market + '-new-' + asofDate + '.csv')
+    positionsNew = []
+    positionsRemoved = []
+    for line in f:
+        data = line.strip().split(',')
+        action = data[0]
+        direction = data[1]
+        symbol = data[2]
+        position = Position(direction, symbol)
+        if action == 'New':
+            positionsNew.append(position)
+        else:
+            positionsRemoved.append(position)
+    return newPositions, removedPositions
+
 #----------------------------------------------------------------------------------
 # Find differences between two portfolios (i.e. new positions and closed positions
 #----------------------------------------------------------------------------------
@@ -238,9 +343,19 @@ def readPortfolio(market, date, source):
 
     return portfolio
     
-#---------------------------------------------------------------------------------------
-# Return correct match string given a date string (e.g. for 20150710, return 10-Jul-15)
-#---------------------------------------------------------------------------------------
+#-------------------------------------------------------------------------------------------
+# Return year, month and day given a standard date (e.g. for 20150710, return (2015, 7, 10)
+#-------------------------------------------------------------------------------------------
+def getDateComponents(stdStr):
+    year = int(stdStr[0:4])
+    month = int(stdStr[4:6])
+    day = int(stdStr[6:8])
+    monthName = time.strftime('%b', (year, month, day, 0, 0, 0, 0, 0, 0))
+    return year, month, day
+
+#-----------------------------------------------------------------------------------------
+# Return correct match string given a standard date (e.g. for 20150710, return 10-Jul-15)
+#-----------------------------------------------------------------------------------------
 def getMatchStr(stdStr):
     year = int(stdStr[0:4])
     month = int(stdStr[4:6])
@@ -392,6 +507,7 @@ def calcSectorPercent(portfolio, sectors):
 def showStats(portfolio, sectors):
     sectorPositions, sectorPercent = calcSectorPercent(portfolio, sectors)
 
+    print('----------------------------------------------')
     for sectorName in sectorPositions.keys():
         print ('%20s: %5.0f %5.0f %5.1f %5.1f') % (sectorName,
                                                    len(sectorPositions[sectorName]['Long']),
@@ -410,6 +526,32 @@ def showStats(portfolio, sectors):
         pctShort = 100.0 * float(totalShort) / float(total)
     print ('%20s: %5.0f %5.0f %5.1f %5.1f') % ('Total', totalLong, totalShort, pctLong, pctShort)
     print('----------------------------------------------')
+
+#--------------------------------------------------------
+# Given two dates, determine diffs and save them in file
+#--------------------------------------------------------
+def saveDiffs(market, dateYesterday, dateToday, SOURCE):
+    portfolioYesterday = readPortfolio(market, dateYesterday, SOURCE)
+    portfolioToday = readPortfolio(market, dateToday, SOURCE)
+    diffs = Diffs(portfolioYesterday, portfolioToday)
+
+    f = open(market + '-diffs-' + dateToday + '.csv', 'w')
+
+    print
+    print 'Diffs between', dateYesterday, 'and', dateToday
+    print '------------------------------------'
+    print 'New:'
+    for position in diffs.newPositions:
+        print position
+        f.write('New,' + position.direction + ',' + position.symbol + '\n')
+    print
+
+    print 'Removed:'
+    for position in diffs.removedPositions:
+        print position
+        f.write('Removed,' + position.direction + ',' + position.symbol + '\n')
+
+    f.close()
 
 #------------------------------------------------
 # Read two portfolios and find their differences
@@ -448,21 +590,8 @@ if __name__ == '__main__':
             dateToday = dates[-1]
             dateYesterday = dates[-2]
 
-    portfolioYesterday = readPortfolio(market, dateYesterday, SOURCE)
-    portfolioToday = readPortfolio(market, dateToday, SOURCE)
-    diffs = Diffs(portfolioYesterday, portfolioToday)
+    saveDiffs(market, dateYesterday, dateToday, SOURCE)
 
-    f = open(market + '-diffs-' + dateToday + '.csv', 'w')
-    print
-    print 'Diffs between', dateYesterday, 'and', dateToday
-    print '------------------------------------'
-    print 'New:'
-    for position in diffs.newPositions:
-        print position
-        f.write('New,' + position.direction + ',' + position.symbol + '\n')
-    print
-    print 'Removed:'
-    for position in diffs.removedPositions:
-        print position
-        f.write('Removed,' + position.direction + ',' + position.symbol + '\n')
-    f.close()
+    #=========================================================================#
+    # Intervene here manually to the diffs file if needed, then run update.py #
+    #=========================================================================#

@@ -163,14 +163,22 @@ if __name__ == '__main__':
         rets.append(portRet.totRet)
 
     # Create chart
+    import matplotlib
+    matplotlib.use('Agg')   # Don't use X server on Unix (otherwise crashes because DISPLAY is not defined)
     import matplotlib.pyplot as plt
     plt.plot(rets)
     locs, labels = plt.xticks(range(len(rets)), dates, size='small')
     plt.setp(labels, rotation=90)
     plt.ylabel('Artemis ' + market + ' Return (%)')
     plt.axes().yaxis.grid()
-    plt.savefig(market + '-plot.png', bbox_inches='tight')
+    #plt.savefig(market + '-plot.png', bbox_inches='tight')
+    filename = market + '-plot.pdf'
+    from matplotlib.backends.backend_pdf import PdfPages
+    pp = PdfPages(filename)
+    pp.savefig(bbox_inches='tight')
+    pp.close()
 
+    # Auto update Excel file (experimental)
     AUTO_UPDATE = False
     if AUTO_UPDATE:
         filename = 'portfolio-artemis-us-test.xlsx'

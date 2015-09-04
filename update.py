@@ -1,7 +1,5 @@
 import sys
 from diffs import *
-from sectors import *
-import random
 
 #==========================================================================================#
 # Run update.py after inspecting the output of diffs.py and intervening manually if needed #
@@ -24,7 +22,7 @@ if __name__ == '__main__':
         asofDate = dates[-1]
     
     # Read current global portfolio
-    portfolio = Portfolio()
+    portfolio = Portfolio(market)
     portfolio.readCsv(market + '-portfolio.csv')
 
     portfolio.update(asofDate)

@@ -1,4 +1,5 @@
 import sys
+sys.path.append('/home/nikoulis/anaconda/lib/python2.7/site-packages')  # For Ubuntu
 import os
 import pdb
 from diffs import *
@@ -12,6 +13,10 @@ if __name__ == '__main__':
         sys.exit()
 
     market = sys.argv[1]
+    #portfolio = Portfolio(market)
+    #portfolio.readMail('P 1-Jun-15')
+    #pdb.set_trace()
+
     dates = updateDates(market)
     for date in dates:
         filename = market + '-' + str(date) + '.csv'

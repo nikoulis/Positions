@@ -6,16 +6,96 @@ import imaplib
 import email
 import os
 import pdb
+import pandas as pd
+from datetime import datetime
+from pandas.io.data import DataReader
+from sectors import *
+import util
+
+#------------------------------------------------------------------
+# Indicative stock information (name, sector, industry, market cap
+#------------------------------------------------------------------
+class StockInfo:
+    def __init__(self, name='', sector='', industry='', marketCap=''):
+        util.initFromArgs(self)
+        self.marketCapNum = getMarketCapNum(marketCap)
+
+    def __str__(self):
+        return(self.name + '|' +
+               self.sector + '|' +
+               self.industry + '|' +
+               self.marketCap + '|' +
+               str(self.marketCapNum))
+
+#-------------------------
+# Trade performance class
+#-------------------------
+class Performance:
+    def __init__(self,
+                 market='US',
+                 symbol='',
+                 direction='',
+                 numShares=0,
+                 entryDate=0,
+                 exitDate=0,
+                 entryPrice=0,
+                 exitPrice=0,
+                 entryAmount=0,
+                 currentAmount=0,
+                 retAmount=0,
+                 ret=0):
+        util.initFromArgs(self)
+
+    def __str__(self):
+        stockInfoHash = readSectorFile(self.market)
+        return '%-8s %-30s %-5s %5s %9s %9s %8.2f %8.2f %8.2f %8.2f %8.2f %7.2f%%' % (
+            self.symbol,
+            stockInfoHash[self.symbol].name[:30],
+            self.direction,
+            self.numShares,
+            getMatchStr(str(self.entryDate)),
+            getMatchStr(str(self.exitDate)),
+            self.entryPrice,
+            self.exitPrice,
+            self.entryAmount,
+            self.currentAmount,
+            self.retAmount,
+            self.ret)
+
+#-------------------------
+# Trade performance class
+#-------------------------
+class portfolioReturn:
+    def __init__(self,
+                 market='US',
+                 date='',
+                 totEntryAmount=0,
+                 totCurrentAmount=0,
+                 totRetAmount=0,
+                 totRet=0):
+        util.initFromArgs(self)
+
+    def __str__(self):
+        return '%10s %10.2f %10.2f %7.2f%%' % (
+            self.date,
+            self.totEntryAmount,
+            self.totRetAmount,
+            self.totRet)
+
+    def toCsv(self):
+        return '%s,%f,%f,%f,%f' % (
+            self.date,
+            self.totEntryAmount,
+            self.totCurrentAmount,
+            self.totRetAmount,
+            self.totRet)
 
 #--------------------------------------------------------
 # A position is a symbol and a direction (Long or Short)
 #--------------------------------------------------------
 class Position:
     def __init__(self, direction, symbol, entryDate=0, exitDate=0):
-        self.direction = direction
-        self.symbol = symbol
-        self.entryDate = entryDate
-        self.exitDate = exitDate
+        util.initFromArgs(self)
 
     def __str__(self):
         return(self.direction + ',' + 
@@ -31,8 +111,9 @@ class Position:
 # A portfolio is a list of positions
 #------------------------------------
 class Portfolio:
-    def __init__(self):
+    def __init__(self, market):
         self.positions = []
+        self.market = market
 
     def __str__(self):
         portfolioStr = ''
@@ -43,33 +124,53 @@ class Portfolio:
                              str(position.exitDate) + '\n')
         return portfolioStr
 
+    #-------------------------------------------------------------
     # Read from csv file (Direction, Symbol, entryDate, exitDate)
-    def readCsv(self, filename):
+    #-------------------------------------------------------------
+    def readCsv(self, filename, direction='Long', entryDate=0, exitDate=0):
         self.positions = []
         f = open(filename)
         for line in f:
             data = line.strip().split(',')
-            position = Position(data[0], data[1], int(data[2]), int(data[3]))
+            if len(data) == 1:
+                symbol = data[0]
+            else:
+                if len(data) >= 2:
+                    direction = data[0]
+                    symbol = data[1]
+                    if len(data) >= 3:
+                        entryDate = int(data[2])
+                        if len(data) >= 4:
+                            exitDate = int(data[3])
+            position = Position(direction, symbol, entryDate, exitDate)
             self.positions.append(position)
         f.close()
 
+    #------------------------------------------------------------
     # Write to csv file (Direction, Symbol, entryDate, exitDate)
+    #------------------------------------------------------------
     def writeCsv(self, filename):
         f = open(filename, 'w')
         for position in self.positions:
             f.write(str(position) + '\n')
         f.close()
 
+    #--------------------------------
     # Add positions to the portfolio
+    #--------------------------------
     def addPositions(self, positions):
         self.positions.extend(positions)
             
+    #---------------------------------
     # Remove positions from portfolio
+    #---------------------------------
     def removePositions(self, positions):
         for position in positions:
             self.positions.pop(position)
 
+    #----------------------
     # Read from Excel file
+    #----------------------
     def readExcel(self, filename):
         self.positions = []
         wb = open_workbook(filename)
@@ -90,7 +191,9 @@ class Portfolio:
                 position = Position(*values)
                 self.positions.append(position)
 
-    # Read US stocks from text file (as saved in Outlook)
+    #-----------------------------------------------------------------
+    # Read US stocks from text file (as saved in Outlook) -- OBSOLETE 
+    #-----------------------------------------------------------------
     def readOutlookUS(self, filename):
         longString = 'LONG'
         shortString = 'SHORT'
@@ -128,7 +231,9 @@ class Portfolio:
                 self.positions.append(position)
         f.close()
 
-    # Read LSE stocks from text file (as saved in Outlook)
+    #------------------------------------------------------------------
+    # Read LSE stocks from text file (as saved in Outlook) -- OBSOLETE
+    #------------------------------------------------------------------
     def readOutlookLSE(self, filename):
         longString = 'LONGS'
         shortString = 'SHORTS'
@@ -164,7 +269,9 @@ class Portfolio:
                 self.positions.append(position)
         f.close()
 
+    #---------------------------------------------------------------
     # Read stocks from Yahoo mail given a subject (P/LSE dd-mmm-yy)
+    #---------------------------------------------------------------
     def readMail(self, subject):
         connection = imaplib.IMAP4_SSL('imap.mail.yahoo.com')
         connection.login('pnikoulis', 'AgiouNikolaou12')
@@ -182,78 +289,49 @@ class Portfolio:
         while isinstance(payload[0], email.message.Message):
             payload = payload[0].get_payload()
         strings = payload.split()
-
-        foundLong = False
-        foundShort = False
-        for string in strings:
-            if string == 'LONGS' or string == 'LONG':
-                foundLong = True
-                foundShort = False
-            elif foundLong and string != 'SHORT' and string != 'SHORTS':
-                # Don't include SHORT (or SHORTS) as a symbol
-                values = ['Long', string]
-                position = Position(*values)
-                self.positions.append(position)
-            elif string == 'SHORTS' or string == 'SHORT':
-                foundShort = True
-                foundLong = False
-            elif foundShort:
-                # Assumes shorts come after longs
-                values = ['Short', string]
-                position = Position(*values)
-                self.positions.append(position)
+        positions = getPositionsFromStrings(strings)
+        self.positions = positions
 
     #------------------------------------------------------------------------
     # Update portfolio based on diffs or a sample portfolio for a given date
     #------------------------------------------------------------------------
-    def update(self, asofDate):
+    def update(self, asofDate, display=False):
         # Read diffs file
-        positionsNew = readDiffs(market + '-new-' + asofDate + '.csv')
-        f = open(market + '-new-' + asofDate + '.csv')
-        positionsNew = []
-        positionsRemoved = []
-        for line in f:
-            data = line.strip().split(',')
-            action = data[0]
-            direction = data[1]
-            symbol = data[2]
-            position = Position(direction, symbol)
-            if action == 'New':
-                positionsNew.append(position)
-            else:
-                positionsRemoved.append(position)
+        positionsNew, positionsRemoved = readDiffs(self.market + '-diffs-' + str(asofDate) + '.csv')
+
+        # Positions actually selected to be added to or removed from portfolio
+        positionsNewSelected = []
+        positionsRemovedSelected = []
 
         SAMPLE = True
         if SAMPLE:
             # Add a number of positions from the sample file (created by create-sample.py)
-            samplePortfolio = Portfolio()
-            samplePortfolio.readCsv(market + '-sample.csv')
-            sectors = readSectorFile()
+            samplePortfolio = Portfolio(self.market)
+            samplePortfolio.readCsv(self.market + '-sample.csv')
+            stockInfoHash = readSectorFile(self.market)
             NUM_DAILY_POSITIONS = 2
-            portfolio = Portfolio()
-            portfolio.readCsv(market + '-portfolio.csv')
             numSamplePositions = min(len(samplePortfolio.positions), NUM_DAILY_POSITIONS)
             if numSamplePositions > 0:
                 j = 0
                 positionIndex = 0
                 while j < numSamplePositions and positionIndex < len(samplePortfolio.positions):
                     samplePosition = samplePortfolio.positions[positionIndex]
-                    if not samplePosition in portfolio.positions:
+                    if (not samplePosition in self.positions) and (not samplePosition in positionsRemoved):
                         samplePosition.entryDate = asofDate
-                        portfolio.positions.append(samplePosition)
-                        #del samplePortfolio.positions[j]
+                        self.positions.append(samplePosition)
+                        positionsNewSelected.append(samplePosition)
                         j += 1
                     positionIndex += 1
 
-                showStats(portfolio, sectors)
-                samplePortfolio.writeCsv(market + '-sample.csv')
-                portfolio.writeCsv(market + '-portfolio.csv')
+                if display:
+                    self.showStats(stockInfoHash)
+                self.writeCsv(self.market + '-portfolio.csv')
         else:
             # Add all new positions to global portfolio, if not already there
-            f = open(market + '-portfolio.csv', 'a')
+            f = open(self.market + '-portfolio.csv', 'a')
             for p in positionsNew:
                 p.entryDate = asofDate
-                if p in portfolio.positions:
+                if p in self.positions:
                     print 'Skipping', str(p)
                 else:
                     print 'Adding', str(p)
@@ -268,23 +346,265 @@ class Portfolio:
             f.close()
 
         # Set exit date for removed positions
-        portfolio = Portfolio()
-        portfolio.readCsv(market + '-portfolio.csv')
-        newPortfolio = Portfolio()
-        for position in portfolio.positions:
+        self.readCsv(self.market + '-portfolio.csv')
+        newPortfolio = Portfolio(self.market)
+        for position in self.positions:
             if position in positionsRemoved:
                 position.exitDate = asofDate
                 print 'Set exitDate of', str(position)
+                positionsRemovedSelected.append(position)
             newPortfolio.positions.append(position)
-        newPortfolio.writeCsv(market + '-portfolio.csv')
-        newPortfolio.writeCsv(market + '-portfolio-' + asofDate + '.csv')
+        newPortfolio.writeCsv(self.market + '-portfolio.csv')
+        newPortfolio.writeCsv(self.market + '-portfolio-' + str(asofDate) + '.csv')
+        writeDiffs(positionsNewSelected, positionsRemovedSelected, self.market + '-new-removed-' + str(asofDate) + '.csv')
 
+    #----------------------------------
+    # Download prices from Yahoo Finance
+    #----------------------------------
+    def downloadPrices(self, startDate, endDate):
+        pricesOpenFilename = 'open-prices-' + self.market + '.csv'
+        pricesAdjCloseFilename = 'adjclose-prices-' + self.market + '.csv'
+        pricesCloseFilename = 'close-prices-' + self.market + '.csv'
+
+        i = 0
+        for position in self.positions:
+            symbol = position.symbol
+            #if symbol == 'ARR':
+            #    pdb.set_trace()
+            allData = DataReader(normalizeSymbol(symbol), 'yahoo', datetime(2015, 4, 22), endDate)
+            print allData.tail(10)
+
+            # Get open prices
+            tsOpen = allData['Open']
+            dataOpen = pd.DataFrame(list(tsOpen.values), index=tsOpen.index, columns=[symbol])
+            if i == 0:
+                pricesOpen = dataOpen
+            else:
+                pricesOpen = pd.concat([pricesOpen, dataOpen], axis=1)
+            pricesOpen = pricesOpen.fillna(method='pad')
+            print pricesOpen.tail(10)
+
+            # Get adjusted close prices
+            tsAdjClose = allData['Adj Close']
+            dataAdjClose = pd.DataFrame(list(tsAdjClose.values), index=tsAdjClose.index, columns=[symbol])
+            if i == 0:
+                pricesAdjClose = dataAdjClose
+            else:
+                pricesAdjClose = pd.concat([pricesAdjClose, dataAdjClose], axis=1)
+            pricesAdjClose = pricesAdjClose.fillna(method='pad')
+            print pricesAdjClose.tail(10)
+
+            # Get unadjusted close prices
+            tsClose = allData['Close']
+            dataClose = pd.DataFrame(list(tsClose.values), index=tsClose.index, columns=[symbol])
+            if i == 0:
+                pricesClose = dataClose
+            else:
+                pricesClose = pd.concat([pricesClose, dataClose], axis=1)
+            pricesClose = pricesClose.fillna(method='pad')
+            print pricesClose.tail(10)
+
+            i += 1
+
+        # Store only data after startDate
+        startIndex = pricesOpen.index.searchsorted(startDate)
+        pricesOpen = pricesOpen.ix[startIndex:]
+        pricesOpen.to_csv(pricesOpenFilename)
+        pricesAdjClose = pricesAdjClose.ix[startIndex:]
+        pricesAdjClose.to_csv(pricesAdjCloseFilename)
+        pricesClose = pricesClose.ix[startIndex:]
+        pricesClose.to_csv(pricesCloseFilename)
+
+    #---------------------------------
+    # Calculate portfolio performance
+    #---------------------------------
+    def calcPerformance(self, asofDate, verbose=False):
+        # Read data from file
+        pricesOpenFilename = 'open-prices-' + self.market + '.csv'
+        pricesAdjCloseFilename = 'adjclose-prices-' + self.market + '.csv'
+        pricesCloseFilename = 'close-prices-' + self.market + '.csv'
+
+        pricesOpen = readPricesFromFile(pricesOpenFilename)
+        pricesAdjClose = readPricesFromFile(pricesAdjCloseFilename)
+        pricesClose = readPricesFromFile(pricesCloseFilename)
+
+        currentDate = int(time.strftime('%Y%m%d'))
+        POSITION_SIZE = 1000
+        MARGIN = 0.5   # i.e. 50% margin must be put up for short sales
+        totEntryAmount = 0
+        totCurrentAmount = 0
+        totRetAmount = 0
+        performances = []
+        if verbose:
+            print '-----------------------------------------------------------------------------------------------------------------------------'
+            print 'Portfolio                               Dir   #Shrs  Entry Dt   Exit Dt Entry Px  Exit Px  Entry $   Exit $      P&L   Return'
+            print '-----------------------------------------------------------------------------------------------------------------------------'
+        for position in [p for p in self.positions if p.entryDate <= asofDate]:
+            symbol = position.symbol
+
+            #if symbol == 'BVS.L' and asofDate == 20150812:
+            #    pdb.set_trace()
+
+            # Get exit price; adjust based on this day's closing price (closing prices
+            # are adjusted in the Yahoo data, but open, high and low prices are not!)
+            lastDate = datetime(*getDateComponents(str(asofDate)))
+            lastDateIndex = pricesAdjClose.index.searchsorted(lastDate)
+            exitPrice = pricesAdjClose.ix[lastDateIndex][symbol]
+            if position.exitDate > 0:
+                exitDate = datetime(*getDateComponents(str(position.exitDate)))
+                nextExitDateIndex = pricesAdjClose.index.searchsorted(exitDate) + 1
+                if nextExitDateIndex <= lastDateIndex:
+                    # Position has exited prior to lastDate; can use next open for exit price
+                    # (otherwise, lastDate's adjusted close price is used)
+                    adjustmentFactor = pricesAdjClose.ix[nextExitDateIndex][symbol] / pricesClose.ix[nextExitDateIndex][symbol]
+                    exitPrice = pricesOpen.ix[nextExitDateIndex][symbol] * adjustmentFactor
+
+            # Get entry price; also adjust based on this day's closing price (closing prices
+            # are adjusted in the Yahoo data, but open, high and low prices are not!)
+            entryDate = datetime(*getDateComponents(str(position.entryDate)))
+            nextOpenDateIndex = pricesOpen.index.searchsorted(entryDate) + 1
+            if nextOpenDateIndex > lastDateIndex:
+                # Force zero return for last date's positions
+                entryPrice = exitPrice
+            else:
+                adjustmentFactor = pricesAdjClose.ix[nextOpenDateIndex][symbol] / pricesClose.ix[nextOpenDateIndex][symbol]
+                entryPrice = pricesOpen.ix[nextOpenDateIndex][symbol] * adjustmentFactor
+
+            # For below calcs, see also lsepx.xlsx
+            if position.direction == 'Short':
+                numShares = max(1, int(float(POSITION_SIZE) / float(entryPrice) / MARGIN))
+                multiplier = MARGIN
+                direction = -1.0
+            else:
+                numShares = max(1, int(float(POSITION_SIZE) / float(entryPrice)))
+                multiplier = 1.0
+                direction = 1.0
+            entryAmount = numShares * entryPrice * multiplier
+            currentAmount = numShares * exitPrice * multiplier
+            retAmount = (currentAmount - entryAmount) * direction / multiplier
+            ret = 100.0 * retAmount / entryAmount
+            if verbose:
+                """
+                maxDates = len(pricesAdjClose.index)
+                if position.entryDate == 0:
+                    entryDate = ''
+                else:
+                    entryDateTimestamp = datetime(*getDateComponents(str(position.entryDate)))
+                    nextEntryDateIndex = pricesAdjClose.index.searchsorted(entryDateTimestamp) + 1
+                    if nextEntryDateIndex < maxDates:
+                        entryDate = int(str(pricesAdjClose.index[nextEntryDateIndex])[:10].replace('-', ''))
+                    else:
+                        entryDate = currentDate
+                if position.exitDate == 0:
+                    exitDate = ''
+                else:
+                    exitDateTimestamp = datetime(*getDateComponents(str(position.exitDate)))
+                    nextExitDateIndex = pricesAdjClose.index.searchsorted(exitDateTimestamp) + 1
+                    if nextExitDateIndex < maxDates:
+                        exitDate = int(str(pricesAdjClose.index[nextExitDateIndex])[:10].replace('-', ''))
+                    else:
+                        exitDate = currentDate
+                """
+                if position.entryDate == 0:
+                    entryDate = ''
+                else:
+                    entryDate = position.entryDate
+                if position.exitDate == 0:
+                    exitDate = ''
+                else:
+                    exitDate = position.exitDate
+                performance = Performance(self.market,
+                                          symbol,
+                                          position.direction,
+                                          numShares,
+                                          entryDate,
+                                          exitDate,
+                                          entryPrice,
+                                          exitPrice,
+                                          entryAmount,
+                                          currentAmount,
+                                          retAmount,
+                                          ret)
+                performances.append(performance)
+                print str(performance)
+
+            totEntryAmount += entryAmount
+            totCurrentAmount += currentAmount
+            totRetAmount += retAmount
+            totRet = 100.0 * totRetAmount / totEntryAmount
+
+        return totEntryAmount, totCurrentAmount, totRetAmount, totRet, performances
+
+    #---------------------------
+    # Show portfolio statistics
+    #---------------------------
+    def showStats(self, stockInfoHash):
+        sectorPositions, sectorPercent = calcSectorPercent(self, stockInfoHash)
+
+        print('----------------------------------------------')
+        print '              Sector:  Nlng Nshrt  Plng Pshrt'
+        print('----------------------------------------------')
+        for sectorName in sectorPositions.keys():
+            print ('%20s: %5.0f %5.0f %5.1f %5.1f') % (sectorName,
+                                                       len(sectorPositions[sectorName]['Long']),
+                                                       len(sectorPositions[sectorName]['Short']),
+                                                       sectorPercent[sectorName]['Long'],
+                                                       sectorPercent[sectorName]['Short'])
+        print('----------------------------------------------')
+        totalLong = len([p for p in self.positions if p.direction == 'Long'])
+        totalShort = len([p for p in self.positions if p.direction == 'Short'])
+        total = totalLong + totalShort
+        if total == 0:
+            pctLong = 0
+            pctShort = 0
+        else:
+            pctLong = 100.0 * float(totalLong) / float(total)
+            pctShort = 100.0 * float(totalShort) / float(total)
+        print ('%20s: %5.0f %5.0f %5.1f %5.1f') % ('Total', totalLong, totalShort, pctLong, pctShort)
+        print('----------------------------------------------')
+
+#-----------------------
+# Read prices from file
+#-----------------------
+def readPricesFromFile(filename):
+    prices = pd.read_csv(filename)
+    prices = prices.fillna(method='pad')
+    dateColumn = prices.columns[0]
+    prices = prices.set_index(dateColumn)
+    prices.index = prices.index.to_datetime()
+    return prices
+
+#-------------------------------------------------------------------------------------------
+# Determine positions from a list of strings (e.g. 'LONG', 'AAPL', 'MSFT', 'SHORT', 'GOOG')
+#-------------------------------------------------------------------------------------------
+def getPositionsFromStrings(strings):
+    positions = []
+    foundLong = False
+    foundShort = False
+    for string in strings:
+        if string == 'LONGS' or string == 'LONG':
+            foundLong = True
+            foundShort = False
+        elif foundLong and string != 'SHORT' and string != 'SHORTS':
+            # Don't include SHORT (or SHORTS) as a symbol
+            values = ['Long', string]
+            position = Position(*values)
+            positions.append(position)
+        elif string == 'SHORTS' or string == 'SHORT':
+            foundShort = True
+            foundLong = False
+        elif foundShort:
+            # Assumes shorts come after longs
+            values = ['Short', string]
+            position = Position(*values)
+            positions.append(position)
+    return positions
 
 #--------------------------------------------------
 # Read new and removed positions from a diffs file
 #--------------------------------------------------
 def readDiffs(filename):
-    f = open(market + '-new-' + asofDate + '.csv')
+    f = open(filename)
     positionsNew = []
     positionsRemoved = []
     for line in f:
@@ -297,7 +617,18 @@ def readDiffs(filename):
             positionsNew.append(position)
         else:
             positionsRemoved.append(position)
-    return newPositions, removedPositions
+    return positionsNew, positionsRemoved
+
+#--------------------------------------------------
+# Read new and removed positions from a diffs file
+#--------------------------------------------------
+def writeDiffs(positionsNew, positionsRemoved, filename):
+    f = open(filename, 'w')
+    for position in positionsNew:
+        f.write('New,' + position.direction + ',' + position.symbol + '\n')
+    for position in positionsRemoved:
+        f.write('Removed,' + position.direction + ',' + position.symbol + '\n')
+    f.close()
 
 #----------------------------------------------------------------------------------
 # Find differences between two portfolios (i.e. new positions and closed positions
@@ -308,12 +639,13 @@ class Diffs:
         positions2 = portfolio2.positions
         self.newPositions = [position for position in positions2 if position not in positions1]
         self.removedPositions = [position for position in positions1 if position not in positions2]
+        self.remainingPositions = [position for position in positions1 if position in positions2]
 
 #-----------------------------------
 # Read a portfolio given a filename
 #-----------------------------------
 def readPortfolio(market, date, source):
-    portfolio = Portfolio()
+    portfolio = Portfolio(market)
     if source == 'Excel':
         # Read from Excel
         portfolio.readExcel(date + '.xlsx')
@@ -327,7 +659,7 @@ def readPortfolio(market, date, source):
             portfolio.readOutlookLSE(filename)
     elif source == 'Yahoo':
         # Read from Yahoo mail (or from text file, if it exists)
-        filename = market + '-' + date + '.csv'
+        filename = market + '-' + str(date) + '.csv'
         if os.path.exists(filename):
             portfolio.readCsv(filename)
         else:
@@ -357,11 +689,14 @@ def getDateComponents(stdStr):
 # Return correct match string given a standard date (e.g. for 20150710, return 10-Jul-15)
 #-----------------------------------------------------------------------------------------
 def getMatchStr(stdStr):
-    year = int(stdStr[0:4])
-    month = int(stdStr[4:6])
-    day = int(stdStr[6:8])
-    monthName = time.strftime('%b', (year, month, day, 0, 0, 0, 0, 0, 0))
-    return str(day) + '-' + monthName + '-' + stdStr[2:4]
+    if stdStr == '':
+        return ''
+    else:
+        year = int(stdStr[0:4])
+        month = int(stdStr[4:6])
+        day = int(stdStr[6:8])
+        monthName = time.strftime('%b', (year, month, day, 0, 0, 0, 0, 0, 0))
+        return str(day) + '-' + monthName + '-' + stdStr[2:4]
 
 #---------------------------------------------------------------------------------
 # Return standard date given a match date (e.g. for 10-Jul-2015, return 20150710)
@@ -382,7 +717,7 @@ def getDates(market):
     f = open(market + '-dates.csv')
     for line in f:
         data = line.strip()
-        dates.append(data)
+        dates.append(int(data))
     return dates
 
 #---------------------------------------------------
@@ -423,9 +758,12 @@ def updateDates(market):
         message = email.message_from_string(data[0][1])
         subject = message['Subject']
         # These are all emails that contain portfolio data (including replies and forwards)
-        foundPortfolio = subject.find(fileMarketIndic)
+        try:
+            foundIndic = subject.find(fileMarketIndic)
+        except:
+            foundIndic = 0
         # These are alll emails that contain portfolio data (original, no replies or forwards)
-        if foundPortfolio == 0:
+        if foundIndic == 0:
             print '------------------------------------------> Message', id
             print 'Date:', message['Date']
             print 'From:', message['From']
@@ -434,6 +772,17 @@ def updateDates(market):
             if date <= lastDate:
                 break
             newDates.append(date)
+            filename = market + '-' + str(date) + '.csv'
+            if (not os.path.exists(filename)) or os.stat(filename).st_size == 0:
+                print 'Saving', filename
+                benchmarkPortfolio = Portfolio(market)
+                payload = message.get_payload()
+                while isinstance(payload[0], email.message.Message):
+                    payload = payload[0].get_payload()
+                    strings = payload.split()
+                    positions = getPositionsFromStrings(strings)
+                benchmarkPortfolio.positions = positions
+                benchmarkPortfolio.writeCsv(filename)
 
     # Update dates file
     newDates = sorted(newDates)
@@ -447,18 +796,36 @@ def updateDates(market):
 #------------------
 # Read sector file
 #------------------
-def readSectorFile(filename='allsectors.csv'):
+def readSectorFile(market):
+    filename = 'sectors-' + market + '.txt'
     f = open(filename)
-    sectors = {}
+    stockInfoHash = {}
     for line in f:
-        data = line.strip().split(',')
-        sectors[data[0]] = data[1]
-    return sectors
+        data = line.strip().split('|')
+        stockInfo = StockInfo(*(data[1:5]))
+        stockInfoHash[data[0]] = stockInfo
+    return stockInfoHash
+
+#-------------------
+# Write sector file
+#-------------------
+def writeSectorFile(market, stockInfoHash):
+    # Read sector file
+    currentStockInfoHash = readSectorFile(market)
+    currentSymbols = currentStockInfoHash.keys()
+
+    # Add stocks that are not in current sector file
+    filename = 'sectors-' + market + '.txt'
+    f = open(filename, 'a')
+    for symbol in stockInfoHash.keys():
+        if symbol not in currentSymbols:
+            f.write(symbol + '|' + str(stockInfoHash(symbol)))
+    f.close()
 
 #-------------------------------------------------------------------------------------------------
 # Calculate percentage of stocks for each sector in a portfolio; also return positions per sector
 #-------------------------------------------------------------------------------------------------
-def calcSectorPercent(portfolio, sectors):
+def calcSectorPercent(portfolio, stockInfoHash):
     sectorNames = ['Basic Materials',
                    'Conglomerates',
                    'Consumer Goods',
@@ -483,8 +850,10 @@ def calcSectorPercent(portfolio, sectors):
             sectorPercent[sectorName][direction] = 0
 
     for position in portfolio.positions:
-        if sectors.get(position.symbol) != None and sectors.get(position.symbol) != '':
-            sectorName = sectors[position.symbol]
+        if (stockInfoHash.get(position.symbol) != None and 
+            stockInfoHash.get(position.symbol).sector != None and
+            stockInfoHash.get(position.symbol).sector != ''):
+            sectorName = stockInfoHash[position.symbol].sector
             sectorPositions[sectorName][position.direction].append(position)
 
     numPositions = sum([len(sectorPositions[sectorName][direction])
@@ -501,54 +870,31 @@ def calcSectorPercent(portfolio, sectors):
     #print 'Num stocks with identified sectors: %d out of %d' % (numPositions, len(portfolio.positions))
     return sectorPositions, sectorPercent
 
-#---------------------------
-# Show portfolio statistics
-#---------------------------
-def showStats(portfolio, sectors):
-    sectorPositions, sectorPercent = calcSectorPercent(portfolio, sectors)
-
-    print('----------------------------------------------')
-    for sectorName in sectorPositions.keys():
-        print ('%20s: %5.0f %5.0f %5.1f %5.1f') % (sectorName,
-                                                   len(sectorPositions[sectorName]['Long']),
-                                                   len(sectorPositions[sectorName]['Short']),
-                                                   sectorPercent[sectorName]['Long'],
-                                                   sectorPercent[sectorName]['Short'])
-    print('----------------------------------------------')
-    totalLong = len([p for p in portfolio.positions if p.direction == 'Long'])
-    totalShort = len([p for p in portfolio.positions if p.direction == 'Short'])
-    total = totalLong + totalShort
-    if total == 0:
-        pctLong = 0
-        pctShort = 0
-    else:
-        pctLong = 100.0 * float(totalLong) / float(total)
-        pctShort = 100.0 * float(totalShort) / float(total)
-    print ('%20s: %5.0f %5.0f %5.1f %5.1f') % ('Total', totalLong, totalShort, pctLong, pctShort)
-    print('----------------------------------------------')
-
 #--------------------------------------------------------
 # Given two dates, determine diffs and save them in file
 #--------------------------------------------------------
-def saveDiffs(market, dateYesterday, dateToday, SOURCE):
+def calcDiffs(market, dateYesterday, dateToday, SOURCE, display=False):
     portfolioYesterday = readPortfolio(market, dateYesterday, SOURCE)
     portfolioToday = readPortfolio(market, dateToday, SOURCE)
     diffs = Diffs(portfolioYesterday, portfolioToday)
 
-    f = open(market + '-diffs-' + dateToday + '.csv', 'w')
+    f = open(market + '-diffs-' + str(dateToday) + '.csv', 'w')
 
-    print
-    print 'Diffs between', dateYesterday, 'and', dateToday
-    print '------------------------------------'
-    print 'New:'
+    if display:
+        print
+        print 'Diffs between', dateYesterday, 'and', dateToday
+        print '------------------------------------'
+        print 'New:'
     for position in diffs.newPositions:
-        print position
+        if display:
+            print position
         f.write('New,' + position.direction + ',' + position.symbol + '\n')
-    print
 
-    print 'Removed:'
+    if display:
+        print 'Removed:'
     for position in diffs.removedPositions:
-        print position
+        if display:
+            print position
         f.write('Removed,' + position.direction + ',' + position.symbol + '\n')
 
     f.close()
@@ -590,7 +936,7 @@ if __name__ == '__main__':
             dateToday = dates[-1]
             dateYesterday = dates[-2]
 
-    saveDiffs(market, dateYesterday, dateToday, SOURCE)
+    calcDiffs(market, dateYesterday, dateToday, SOURCE)
 
     #=========================================================================#
     # Intervene here manually to the diffs file if needed, then run update.py #

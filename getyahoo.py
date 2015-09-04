@@ -1,15 +1,17 @@
 import sys
 from sectors import *
 from diffs import *
+import codecs
 
 #------------------------------------------------------------------
-# Read a portfolio and get sectors and market caps for its symbols
+# Read a portfolio, get names, sectors, industries and market caps
+# for its symbols and save in sectors file (if not already there)
 #------------------------------------------------------------------
 if __name__ == '__main__':
     if len(sys.argv) < 2:
         print 'Usage: getyahoo.py <US/LSE> <yyyymmmdd>'
         sys.exit()
-
+        
     market = sys.argv[1]
     if len(sys.argv) >= 3:
         asofDate = sys.argv[2]
@@ -19,14 +21,18 @@ if __name__ == '__main__':
         asofDate = dates[-1]
     print 'asofDate =', asofDate
     
-    # Get sector, industry and market cap for current portfolio
-    portfolio = Portfolio()
+    portfolio = Portfolio(market)
     portfolio.readCsv(market + '-' + str(asofDate) + '.csv')
 
-    f = open('sectors-' + market + '.txt', 'w')
+    currentStockInfoHash = readSectorFile(market)
+    currentSymbols = currentStockInfoHash.keys()
+
+    f = codecs.open('sectors-' + market + '.txt', 'a', 'utf-8')
     for position in portfolio.positions:
         symbol = position.symbol
-        name, sector, industry, marketCap = getYahooFinanceData(symbol)
-        print symbol, name, sector, industry, marketCap
-        f.write(symbol + '|' + name  + '|' + sector + '|' + industry + '|' + marketCap + '\n')
+        if not symbol in currentSymbols:
+            name, sector, industry, marketCap = getYahooFinanceData(symbol)
+            marketCapNum = getMarketCapNum(marketCap)
+            print symbol, name, sector, industry, marketCap, marketCapNum
+            f.write(symbol + '|' + name  + '|' + sector + '|' + industry + '|' + marketCap + '|' + str(marketCapNum) + '\n')
     f.close()

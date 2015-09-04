@@ -1,124 +1,192 @@
+import sys
+sys.path.append('/home/nikoulis/anaconda/lib/python2.7/site-packages')  # For Ubuntu
+from xlrd import open_workbook
+from openpyxl import *
 import urllib
 import pandas as pd
-from pandas.io.data import DataReader
 from datetime import datetime
+from time import strftime
 import pdb
 from diffs import *
 
+#-----------------------------------------------------------------------------------
+# Flatten a list of lists (used to calculate total number of trades, long or short)
+#-----------------------------------------------------------------------------------
+def flatten(l):
+    return [item for sublist in l for item in sublist]
+
+#---------------------------------
+# Calculate portfolio performance
+#---------------------------------
 if __name__ == '__main__':
     if len(sys.argv) < 2:
         print 'Usage: performance.py <US/LSE> <yyyymmmdd>'
         sys.exit()
 
     market = sys.argv[1]
+    dates = getDates(market)
     if len(sys.argv) >= 3:
         asofDate = sys.argv[2]
     else:
         # Use last date from file
-        dates = getDates(market)
         asofDate = dates[-1]
 
-    portfolio = Portfolio()
+    currentDate = int(time.strftime('%Y%m%d'))
+
+    #asofDate = time.strftime('%Y%m%d')
+    portfolio = Portfolio(market)
     portfolio.readCsv(market + '-portfolio.csv')
 
-    # Read symbols
-    startDate = datetime(*getDateComponents(str(min([position.entryDate for position in portfolio.positions]))))
+    # Download prices and calculate performance
+    startDate = datetime(*getDateComponents(str(min([p.entryDate for p in portfolio.positions]))))
     endDate = datetime(*getDateComponents(str(asofDate)))
-
-    pricesOpenFilename = 'open-prices-' + market + '.csv'
-    pricesCloseFilename = 'close-prices-' + market + '.csv'
-
-    DOWNLOAD = False
+    DOWNLOAD = True
     if DOWNLOAD:
-        # Download data
-        i = 0
-        for position in portfolio.positions:
-            symbol = position.symbol
-            allData = DataReader(symbol, 'yahoo', datetime(2000, 1, 1), endDate)
-            print allData.tail(10)
+        portfolio.downloadPrices(startDate, endDate)
+    FULL = False
+    if FULL:
+        startDateIndex = 0
+    else:
+        startDateIndex = dates.index(20150818)
+    date = asofDate
 
-            # Get open prices
-            tsOpen = allData['Open']
-            dataOpen = pd.DataFrame(list(tsOpen.values), index=tsOpen.index, columns=[symbol])
-            if i == 0:
-                pricesOpen = dataOpen
-            else:
-                pricesOpen = pd.concat([pricesOpen, dataOpen], axis=1)
-            print pricesOpen.tail(10)
+    # From this point on, redirect output to file
+    filename = market + '-perf-' + str(asofDate) + '.txt'
+    sys.stdout = open(filename, 'w')
 
-            # Get close prices
-            tsClose = allData['Adj Close']
-            dataClose = pd.DataFrame(list(tsClose.values), index=tsClose.index, columns=[symbol])
-            if i == 0:
-                pricesClose = dataClose
-            else:
-                pricesClose = pd.concat([pricesClose, dataClose], axis=1)
-            print pricesClose.tail(10)
+    totEntryAmount, totCurrentAmount, totRetAmount, totRet, performances = portfolio.calcPerformance(date, True)
 
-            i += 1
-
-        startIndex = pricesOpen.index.searchsorted(startDate)
-        pricesOpen = pricesOpen.ix[startIndex:]
-        pricesOpen.to_csv(pricesOpenFilename)
-        pricesClose = pricesClose.ix[startIndex:]
-        pricesClose.to_csv(pricesCloseFilename)
-
-    # Read data from file
-    pricesOpen = pd.read_csv(pricesOpenFilename)
-    pricesOpen = pricesOpen.set_index('Date')
-    pricesOpen.index = pricesOpen.index.to_datetime()
-
-    pricesClose = pd.read_csv(pricesCloseFilename)
-    pricesClose = pricesClose.set_index('Date')
-    pricesClose.index = pricesClose.index.to_datetime()
-
-    POSITION_SIZE = 1000
-    MARGIN = 0.05   # i.e. 5%
-    #lastDate = pricesClose.index[-1]
-    lastDate = datetime(2015, 8, 10)
-    totEntryAmount = 0
-    totCurrentAmount = 0
-    totRetAmount = 0
-    for position in portfolio.positions:
-        symbol = position.symbol
-        entryDate = datetime(*getDateComponents(str(position.entryDate)))
-        nextOpenDate = pricesOpen.index.searchsorted(entryDate) + 1
-        entryPrice = pricesOpen.ix[nextOpenDate][symbol]
-        currentPrice = pricesClose.ix[lastDate][symbol]
-        # For below calcs, see also lsepx.xlsx
-        numShares = max(1, int(float(POSITION_SIZE) / float(entryPrice)))
-        if position.direction == 'Short':
-            multiplier = 1.0 - MARGIN
-            direction = -1.0
-        else:
-            multiplier = 1.0
-            direction = 1.0
-        entryAmount = numShares * entryPrice * direction * multiplier
-        currentAmount = numShares * currentPrice * direction * multiplier
-        retAmount = (currentAmount - entryAmount) / multiplier
-        ret = 100.0 * retAmount / entryAmount
-        if position.direction == 'Short':
-            ret = -ret
-        print '%-8s %-5s %9s %9s %4d %8.2f %8.2f %8.2f %8.2f %8.2f %7.2f%%' % (
-            symbol,
-            position.direction,
-            numShares,
-            getMatchStr(str(position.entryDate)),
-            0,
-            entryPrice,
-            currentPrice,
-            entryAmount,
-            currentAmount,
-            retAmount,
-            ret)
-
-        totEntryAmount += entryAmount
-        totCurrentAmount += currentAmount
-        totRetAmount += retAmount
-        totRet = 100.0 * totRetAmount / totEntryAmount
+    #-------------------------------------------------------------------------
+    # Now present the trades in a different format (similar to the Excel file
+    #-------------------------------------------------------------------------
+    newTradePerformances = [[p for p in performances if p.entryDate == asofDate and
+                             p.direction == 'Long'],
+                            [p for p in performances if p.entryDate == asofDate and
+                             p.direction == 'Short']]
+    removedTradePerformances = [[p for p in performances if p.exitDate == asofDate and
+                                 p.direction == 'Long'],
+                                [p for p in performances if p.exitDate == asofDate and
+                                 p.direction == 'Short']]
+    openTradePerformances = [[p for p in performances if p.entryDate < asofDate and
+                              (p.exitDate == '' or p.exitDate == asofDate) and p.direction == 'Long'],
+                             [p for p in performances if p.entryDate < asofDate and
+                              (p.exitDate == '' or p.exitDate == asofDate) and p.direction == 'Short']]
+    closedTradePerformances = [[p for p in performances if p.entryDate < asofDate and p.exitDate != '' and
+                                p.exitDate < asofDate and p.direction == 'Long'],
+                               [p for p in performances if p.entryDate < asofDate and p.exitDate != '' and
+                                p.exitDate < asofDate and p.direction == 'Short']]
+    stockInfoHash = readSectorFile(market)
 
     print
-    print '%8.2f %8.2f %8.2f %7.2f%%' % (totEntryAmount,
-                                         totCurrentAmount,
-                                         totRetAmount,
-                                         totRet)
+    print '-----------------------------------------------------------------------------------------------------------------------------'
+    print 'New Trades                              Dir   #Shrs  Entry Dt   Exit Dt Entry Px  Exit Px  Entry $   Exit $      P&L   Return'
+    print '-----------------------------------------------------------------------------------------------------------------------------'
+    numNewTrades = len(flatten(newTradePerformances))
+    if numNewTrades == 0:
+        print 'None'
+    else:
+        for newTrades in newTradePerformances:
+            for p in newTrades:
+                p.entryDate = currentDate
+                print str(p)
+    print
+    print '-----------------------------------------------------------------------------------------------------------------------------'
+    print 'Removed Trades                          Dir   #Shrs  Entry Dt   Exit Dt Entry Px  Exit Px  Entry $   Exit $      P&L   Return'
+    print '-----------------------------------------------------------------------------------------------------------------------------'
+    numRemovedTrades = len(flatten(removedTradePerformances))
+    if numRemovedTrades == 0:
+        print 'None'
+    else:
+        for removedTrades in removedTradePerformances:
+            for p in removedTrades:
+                p.exitDate = currentDate
+                print str(p)
+    print
+    print '-----------------------------------------------------------------------------------------------------------------------------'
+    print 'Open Trades                             Dir   #Shrs  Entry Dt   Exit Dt Entry Px  Exit Px  Entry $   Exit $      P&L   Return'
+    print '-----------------------------------------------------------------------------------------------------------------------------'
+    numOpenTrades = len(flatten(openTradePerformances))
+    if numOpenTrades == 0:
+        print 'None'
+    else:
+        for openTrades in openTradePerformances:
+            for p in openTrades:
+                p.entryDate = dates[dates.index(p.entryDate) + 1]
+                print str(p)
+    print
+    print '-----------------------------------------------------------------------------------------------------------------------------'
+    print 'Closed Trades                           Dir   #Shrs  Entry Dt   Exit Dt Entry Px  Exit Px  Entry $   Exit $      P&L   Return'
+    print '-----------------------------------------------------------------------------------------------------------------------------'
+    numClosedTrades = len(flatten(closedTradePerformances))
+    if numClosedTrades == 0:
+        print 'None'
+    else:
+        for closedTrades in closedTradePerformances:
+            for p in closedTrades:
+                p.entryDate = dates[dates.index(p.entryDate) + 1]
+                p.exitDate = dates[dates.index(p.exitDate) + 1]
+                print str(p)
+
+    totTradePerformances = openTradePerformances + closedTradePerformances
+    totEntryAmount = sum([p.entryAmount for p in flatten(totTradePerformances)])
+    totCurrentAmount = sum([p.currentAmount for p in flatten(totTradePerformances)])
+    totRetAmount = sum([p.retAmount for p in flatten(totTradePerformances)])
+    totRet = 100.0 * totRetAmount / totEntryAmount
+
+    # Append return to historical performance file (if not already there for that date)
+    filename = market + '-port-ret.csv'
+    portRets = []
+    f = open(filename)
+    for line in f:
+        data = line.strip().split(',')
+        portRet = portfolioReturn(market, data[0], float(data[1]), float(data[2]), float(data[3]), float(data[4].replace('%', '')))
+        portRets.append(portRet)
+    f.close()
+    portRetDates = [portRet.date for portRet in portRets]
+    if getMatchStr(str(asofDate)) not in portRetDates:
+        f = open(filename, 'a')
+        portRet = portfolioReturn(market, getMatchStr(str(asofDate)), totEntryAmount, totCurrentAmount, totRetAmount, totRet)
+        f.write(portRet.toCsv() + '\n')
+        portRets.append(portRet)
+        f.close()
+
+    # Now print portfolio returns for all dates
+    print
+    print '-----------------------------------------'
+    print 'Performance  Invested        P&L   Return'
+    print '-----------------------------------------'
+    dates = []
+    rets = []
+    for portRet in portRets:
+        print str(portRet)
+        dates.append(portRet.date)
+        rets.append(portRet.totRet)
+
+    # Create chart
+    import matplotlib.pyplot as plt
+    plt.plot(rets)
+    locs, labels = plt.xticks(range(len(rets)), dates, size='small')
+    plt.setp(labels, rotation=90)
+    plt.ylabel('Artemis ' + market + ' Return (%)')
+    plt.axes().yaxis.grid()
+    plt.savefig(market + '-plot.png', bbox_inches='tight')
+
+    AUTO_UPDATE = False
+    if AUTO_UPDATE:
+        filename = 'portfolio-artemis-us-test.xlsx'
+        wb = load_workbook(filename)
+        sheet = wb.get_sheet_by_name('Email')
+        newTradeRanges = ['open_long', 'close_long', 'open_short', 'close_short']
+        newTradePerformances = [[p for p in performances if p.entryDate == asofDate and p.direction == 'Long'],
+                                [p for p in performances if p.exitDate == asofDate and p.direction == 'Long'],
+                                [p for p in performances if p.entryDate == asofDate and p.direction == 'Short'],
+                                [p for p in performances if p.exitDate == asofDate and p.direction == 'Short']]
+        for i in range(len(newTradeRanges)):
+            #namedRange = rb.name_and_scope_map.get((newTradeRanges[i], -1))
+            j = 0
+            for performance in newTradePerformances[i]:
+                pass
+        #sheet["'" + cellStr[cellStr.find('!') + 1:] + "'"] = 'AAPL'
+        sheeet = wb.get_sheet_by_name('Email')
+        sheet['D8'] = 'AAPL'
+        wb.save('a.xlsx')

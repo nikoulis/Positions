@@ -16,16 +16,24 @@ if __name__ == '__main__':
         dates = getDates(market)
         asofDate = dates[-1]
 
-    benchmarkPortfolio = Portfolio()
-    benchmarkPortfolio.readCsv(market + '-' + asofDate + '.csv')
-    # Read benchmark portfolio and calculate sector percentages
     NUM_SAMPLE_POSITIONS = 100
-    benchmarkPortfolio = Portfolio()
-    benchmarkPortfolio.readCsv(market + '-' + asofDate + '.csv')
-    sectors = readSectorFile()
-    benchmarkSectorPositions, benchmarkSectorPercent = calcSectorPercent(benchmarkPortfolio, sectors)
-    showStats(benchmarkPortfolio, sectors)
-    samplePortfolio = Portfolio()
+
+    # Read benchmark portfolio
+    benchmarkPortfolio = Portfolio(market)
+    benchmarkPortfolio.readCsv(market + '-' + str(asofDate) + '.csv')
+
+    # Exclude symbols in foreign markets, or without sectors, or without market caps,
+    # or where market cap < $5bn (for the US portfolio only)
+    stockInfoHash = readSectorFile(market)
+    sectorSymbols = [s for s in stockInfoHash.keys()
+                     if (s.find('.') == -1 or market == 'LSE') and
+                     stockInfoHash[s].sector != '' and 
+                     (stockInfoHash[s].marketCapNum > 5000 or market == 'LSE')]
+    benchmarkPortfolio.positions = [p for p in benchmarkPortfolio.positions if p.symbol in sectorSymbols]
+    # Calculate sector percentages and sample accordingly
+    benchmarkSectorPositions, benchmarkSectorPercent = calcSectorPercent(benchmarkPortfolio, stockInfoHash)
+    benchmarkPortfolio.showStats(stockInfoHash)
+    samplePortfolio = Portfolio(market)
     for sectorName in benchmarkSectorPositions.keys():
         for direction in benchmarkSectorPositions[sectorName]:
             benchmarkPositions = benchmarkSectorPositions[sectorName][direction]
@@ -44,9 +52,9 @@ if __name__ == '__main__':
                     print str(position)
                 samplePortfolio.positions.extend(samplePositions)
     print
-    showStats(benchmarkPortfolio, sectors)
+    benchmarkPortfolio.showStats(stockInfoHash)
     print
-    showStats(samplePortfolio, sectors)
+    samplePortfolio.showStats(stockInfoHash)
 
     # Save portfolio to file for future reference
     samplePortfolio.writeCsv(market + '-sample.csv')

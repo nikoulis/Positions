@@ -31,7 +31,14 @@ if __name__ == '__main__':
         # Use last date from file
         asofDate = dates[-1]
 
+    # Don't run if it's a holiday
     currentDate = int(time.strftime('%Y%m%d'))
+    filename = market + '-holidays.csv'
+    f = open(filename)
+    for line in f:
+        date = int(line.strip())
+        if date == currentDate:
+            sys.exit()
 
     #asofDate = time.strftime('%Y%m%d')
     portfolio = Portfolio(market)

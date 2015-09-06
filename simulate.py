@@ -15,6 +15,15 @@ if __name__ == '__main__':
     dates = getDates(market)
     numDates = len(dates)
 
+    # Don't run if it's a holiday
+    currentDate = int(time.strftime('%Y%m%d'))
+    filename = market + '-holidays.csv'
+    f = open(filename)
+    for line in f:
+        date = int(line.strip())
+        if date == currentDate:
+            sys.exit()
+
     FULL = False
     if FULL:
         startDateIndex = 0

@@ -22,6 +22,7 @@ if __name__ == '__main__':
     for line in f:
         date = int(line.strip())
         if date == currentDate:
+            print currentDate + ' is a holiday.'
             sys.exit()
 
     FULL = False

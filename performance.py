@@ -38,6 +38,7 @@ if __name__ == '__main__':
     for line in f:
         date = int(line.strip())
         if date == currentDate:
+            print currentDate + ' is a holiday.'
             sys.exit()
 
     #asofDate = time.strftime('%Y%m%d')
@@ -47,7 +48,7 @@ if __name__ == '__main__':
     # Download prices and calculate performance
     startDate = datetime(*getDateComponents(str(min([p.entryDate for p in portfolio.positions]))))
     endDate = datetime(*getDateComponents(str(asofDate)))
-    DOWNLOAD = True
+    DOWNLOAD = False
     if DOWNLOAD:
         portfolio.downloadPrices(startDate, endDate)
     FULL = False

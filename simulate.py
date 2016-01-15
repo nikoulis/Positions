@@ -14,22 +14,35 @@ if __name__ == '__main__':
     market = sys.argv[1]
     dates = getDates(market)
     numDates = len(dates)
+    if len(sys.argv) >= 3:
+        asofDate = sys.argv[2]
+    else:
+        # Use last date from file
+        asofDate = dates[-1]
+
+    currentDate = int(time.strftime('%Y%m%d'))
 
     # Don't run if it's a holiday
-    currentDate = int(time.strftime('%Y%m%d'))
-    filename = market + '-holidays.csv'
+    filename = getMarket(market) + '-holidays.csv'
     f = open(filename)
     for line in f:
         date = int(line.strip())
         if date == currentDate:
-            print currentDate + ' is a holiday.'
+            print str(currentDate) + ' is a holiday.'
             sys.exit()
 
     FULL = False
     if FULL:
         startDateIndex = 0
     else:
-        startDateIndex = dates.index(20150817)
+        if market == 'US':
+            startDateIndex = dates.index(20151006)
+        elif market == 'LSE':
+            startDateIndex = dates.index(20150922)
+        elif market == 'US-tradehero':
+            startDateIndex = dates.index(20151022)
+        elif market == 'LSE-tradehero':
+            startDateIndex = dates.index(20151022)
 
     # Start from empty portfolio, then update
     portfolio = Portfolio(market)

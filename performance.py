@@ -24,7 +24,7 @@ if __name__ == '__main__':
         sys.exit()
 
     market = sys.argv[1]
-    dates = getDates(market)
+    dates = getDates(getMarket(market))
     if len(sys.argv) >= 3:
         asofDate = sys.argv[2]
     else:
@@ -33,13 +33,24 @@ if __name__ == '__main__':
 
     # Don't run if it's a holiday
     currentDate = int(time.strftime('%Y%m%d'))
-    filename = market + '-holidays.csv'
+    filename = getMarket(market) + '-holidays.csv'
     f = open(filename)
+    holidays = []
     for line in f:
-        date = int(line.strip())
-        if date == currentDate:
-            print currentDate + ' is a holiday.'
-            sys.exit()
+        holiday = int(line.strip())
+        holidays.append(holiday)
+    if currentDate in holidays:
+        print str(currentDate) + ' is a holiday.'
+        sys.exit()
+
+    # Don't run if today's becnhmark file hasn't been saved (this can happen if today's email doesn't arrive
+    # by the time preprocess.py runs, or if the email subject is wrong); in that case, the performance
+    # report isn't updated either.  If preprocess.py doesn't find a new email to save (and to update the
+    # dates.csv file), then yesterday's benchmark file will still be there, saved with yesterday's date.
+    filename = getMarket(market) + '-' + str(asofDate) + '.csv'
+    fileSavedDate = int(datetime.strptime(time.ctime(os.path.getctime(filename)), "%a %b %d %H:%M:%S %Y").strftime('%Y%m%d'))
+    if fileSavedDate != currentDate and fileSavedDate not in holidays:
+        sys.exit()
 
     #asofDate = time.strftime('%Y%m%d')
     portfolio = Portfolio(market)
@@ -48,21 +59,65 @@ if __name__ == '__main__':
     # Download prices and calculate performance
     startDate = datetime(*getDateComponents(str(min([p.entryDate for p in portfolio.positions]))))
     endDate = datetime(*getDateComponents(str(asofDate)))
-    DOWNLOAD = False
+    DOWNLOAD = True
     if DOWNLOAD:
         portfolio.downloadPrices(startDate, endDate)
+    if market == 'US':
+        inceptionDate = 20151007
+    elif market == 'LSE':
+        inceptionDate = 20150923
+    elif market == 'US-tradehero':
+        inceptionDate = 20151023
+    elif market == 'LSE-tradehero':
+        inceptionDate = 20151023
     FULL = False
     if FULL:
         startDateIndex = 0
     else:
-        startDateIndex = dates.index(20150818)
+        startDateIndex = dates.index(inceptionDate)
     date = asofDate
 
     # From this point on, redirect output to file
     filename = market + '-perf-' + str(asofDate) + '.txt'
     sys.stdout = open(filename, 'w')
 
-    totEntryAmount, totCurrentAmount, totRetAmount, totRet, performances = portfolio.calcPerformance(date, True)
+    if market == 'US-tradehero' or market == 'LSE-tradehero':
+        verbose = False
+    else:
+        verbose = True
+
+    #---------------------------------------------
+    # Calculate portfolio returns since inception
+    #---------------------------------------------
+    DISPLAY_CALC_RETS = False
+    if DISPLAY_CALC_RETS:
+        calcPortRets = []
+        startIndex = dates.index(inceptionDate)
+        endIndex = dates.index(asofDate) + 1
+        for i in range(startIndex, endIndex):
+            if market == 'US' or market == 'LSE':
+                if i == endIndex - 1:
+                    verbose = True
+                else:
+                    verbose = False
+            totEntryAmount, totCurrentAmount, totRetAmount, totRet, performances = portfolio.calcPerformance(dates[i], verbose)
+
+            openTradePerformances = [p for p in performances if p.entryDate < dates[i] and (p.exitDate == '' or p.exitDate == dates[i])]
+            closedTradePerformances = [p for p in performances if p.entryDate < dates[i] and p.exitDate != '' and p.exitDate < dates[i]]
+
+            totTradePerformances = openTradePerformances + closedTradePerformances
+            totEntryAmount = sum([p.entryAmount for p in totTradePerformances])
+            totCurrentAmount = sum([p.currentAmount for p in totTradePerformances])
+            totRetAmount = sum([p.retAmount for p in totTradePerformances])
+            if totEntryAmount == 0:
+                totRet = 0
+            else:
+                totRet = 100.0 * totRetAmount / totEntryAmount
+
+            calcPortRet = PortfolioReturn(market, getMatchStr(str(dates[i])), totEntryAmount, totCurrentAmount, totRetAmount, totRet)
+            calcPortRets.append(calcPortRet)
+    else:
+        totEntryAmount, totCurrentAmount, totRetAmount, totRet, performances = portfolio.calcPerformance(asofDate, verbose)
 
     #-------------------------------------------------------------------------
     # Now present the trades in a different format (similar to the Excel file
@@ -83,7 +138,7 @@ if __name__ == '__main__':
                                 p.exitDate < asofDate and p.direction == 'Long'],
                                [p for p in performances if p.entryDate < asofDate and p.exitDate != '' and
                                 p.exitDate < asofDate and p.direction == 'Short']]
-    stockInfoHash = readSectorFile(market)
+    stockInfoHash = readSectorFile(getMarket(market))
 
     print
     print '-----------------------------------------------------------------------------------------------------------------------------'
@@ -121,6 +176,7 @@ if __name__ == '__main__':
             for p in openTrades:
                 p.entryDate = dates[dates.index(p.entryDate) + 1]
                 print str(p)
+            print '-----------------------------------------------------------------------------------------------------------------------------'
     print
     print '-----------------------------------------------------------------------------------------------------------------------------'
     print 'Closed Trades                           Dir   #Shrs  Entry Dt   Exit Dt Entry Px  Exit Px  Entry $   Exit $      P&L   Return'
@@ -134,46 +190,71 @@ if __name__ == '__main__':
                 p.entryDate = dates[dates.index(p.entryDate) + 1]
                 p.exitDate = dates[dates.index(p.exitDate) + 1]
                 print str(p)
+            print '-----------------------------------------------------------------------------------------------------------------------------'
 
     totTradePerformances = openTradePerformances + closedTradePerformances
     totEntryAmount = sum([p.entryAmount for p in flatten(totTradePerformances)])
     totCurrentAmount = sum([p.currentAmount for p in flatten(totTradePerformances)])
     totRetAmount = sum([p.retAmount for p in flatten(totTradePerformances)])
-    totRet = 100.0 * totRetAmount / totEntryAmount
+    if totEntryAmount == 0:
+        totRet = 0
+    else:
+        totRet = 100.0 * totRetAmount / totEntryAmount
 
+    #-----------------------------------------------------------------------------------
     # Append return to historical performance file (if not already there for that date)
+    #-----------------------------------------------------------------------------------
     filename = market + '-port-ret.csv'
     portRets = []
     f = open(filename)
     for line in f:
         data = line.strip().split(',')
-        portRet = portfolioReturn(market, data[0], float(data[1]), float(data[2]), float(data[3]), float(data[4].replace('%', '')))
+        portRet = PortfolioReturn(market, data[0], float(data[1]), float(data[2]), float(data[3]), float(data[4].replace('%', '')))
         portRets.append(portRet)
     f.close()
     portRetDates = [portRet.date for portRet in portRets]
     if getMatchStr(str(asofDate)) not in portRetDates:
         f = open(filename, 'a')
-        portRet = portfolioReturn(market, getMatchStr(str(asofDate)), totEntryAmount, totCurrentAmount, totRetAmount, totRet)
+        portRet = PortfolioReturn(market, getMatchStr(str(asofDate)), totEntryAmount, totCurrentAmount, totRetAmount, totRet)
         f.write(portRet.toCsv() + '\n')
         portRets.append(portRet)
         f.close()
 
-    # Now print portfolio returns for all dates
+    #-------------------------------------------------------
+    # Print portfolio returns for all dates since inception
+    #-------------------------------------------------------
     print
     print '-----------------------------------------'
     print 'Performance  Invested        P&L   Return'
     print '-----------------------------------------'
-    dates = []
-    rets = []
-    for portRet in portRets:
-        print str(portRet)
-        dates.append(portRet.date)
-        rets.append(portRet.totRet)
 
+    # Using stored values in port-ret.csv file
+    DISPLAY_STORED_RETS = True
+    if DISPLAY_STORED_RETS:
+        dates = [getMatchStr(str(inceptionDate))]
+        rets = [0]
+        for portRet in portRets:
+            print str(portRet)
+            dates.append(portRet.date)
+            rets.append(portRet.totRet)
+
+    # Using calculated values
+    if DISPLAY_CALC_RETS:
+        print
+        calcDates = []
+        calcRets = []
+        for i in range(1, len(calcPortRets)):
+            print str(calcPortRets[i])
+            calcDates.append(calcPortRet.date)
+            calcRets.append(calcPortRet.totRet)
+
+    #--------------
     # Create chart
+    #--------------
     import matplotlib
     matplotlib.use('Agg')   # Don't use X server on Unix (otherwise crashes because DISPLAY is not defined)
     import matplotlib.pyplot as plt
+    plt.figure(figsize=(11, 8.5))
     plt.plot(rets)
     locs, labels = plt.xticks(range(len(rets)), dates, size='small')
     plt.setp(labels, rotation=90)
@@ -183,10 +264,12 @@ if __name__ == '__main__':
     filename = market + '-plot.pdf'
     from matplotlib.backends.backend_pdf import PdfPages
     pp = PdfPages(filename)
-    pp.savefig(bbox_inches='tight')
+    pp.savefig(papersize='letter', orientation='landscape', bbox_inches='tight', pad_inches=1)
     pp.close()
 
-    # Auto update Excel file (experimental)
+
+    """
+    # Auto update Excel file (highly experimental -- don't use)
     AUTO_UPDATE = False
     if AUTO_UPDATE:
         filename = 'portfolio-artemis-us-test.xlsx'
@@ -206,3 +289,4 @@ if __name__ == '__main__':
         sheeet = wb.get_sheet_by_name('Email')
         sheet['D8'] = 'AAPL'
         wb.save('a.xlsx')
+    """

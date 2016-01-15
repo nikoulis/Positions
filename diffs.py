@@ -62,10 +62,10 @@ class Performance:
             self.retAmount,
             self.ret)
 
-#-------------------------
-# Trade performance class
-#-------------------------
-class portfolioReturn:
+#------------------------
+# Portfolio return class
+#------------------------
+class PortfolioReturn:
     def __init__(self,
                  market='US',
                  date='',
@@ -98,13 +98,13 @@ class Position:
         util.initFromArgs(self)
 
     def __str__(self):
-        return(self.direction + ',' + 
+        return(self.direction + ',' +
                self.symbol + ',' +
                str(self.entryDate) + ',' +
                str(self.exitDate))
 
     def __eq__(self, other):
-        return ((self.direction == other.direction) and 
+        return ((self.direction == other.direction) and
                 (self.symbol == other.symbol))
 
 #------------------------------------
@@ -160,7 +160,7 @@ class Portfolio:
     #--------------------------------
     def addPositions(self, positions):
         self.positions.extend(positions)
-            
+
     #---------------------------------
     # Remove positions from portfolio
     #---------------------------------
@@ -192,7 +192,7 @@ class Portfolio:
                 self.positions.append(position)
 
     #-----------------------------------------------------------------
-    # Read US stocks from text file (as saved in Outlook) -- OBSOLETE 
+    # Read US stocks from text file (as saved in Outlook) -- OBSOLETE
     #-----------------------------------------------------------------
     def readOutlookUS(self, filename):
         longString = 'LONG'
@@ -274,8 +274,8 @@ class Portfolio:
     #---------------------------------------------------------------
     def readMail(self, subject):
         connection = imaplib.IMAP4_SSL('imap.mail.yahoo.com')
-        connection.login('pnikoulis', 'AgiouNikolaou12')
-        connection.select()
+        connection.login('pnikoulis', 'ai024709th3669')
+        connection.select(readonly=True)
         typ, data = connection.search(None, 'SUBJECT', subject)
         ids = data[0].split()
         id = ids[0]
@@ -285,12 +285,7 @@ class Portfolio:
         print 'Date:', message['Date']
         print 'From:', message['From']
         print 'Subject:', message['Subject']
-        payload = message.get_payload()
-        while isinstance(payload[0], email.message.Message):
-            payload = payload[0].get_payload()
-        strings = payload.split()
-        positions = getPositionsFromStrings(strings)
-        self.positions = positions
+        self.positions = getPositionsFromMessage(message)
 
     #------------------------------------------------------------------------
     # Update portfolio based on diffs or a sample portfolio for a given date
@@ -298,6 +293,10 @@ class Portfolio:
     def update(self, asofDate, display=False):
         # Read diffs file
         positionsNew, positionsRemoved = readDiffs(self.market + '-diffs-' + str(asofDate) + '.csv')
+
+        # Also read benchmark portfolio for this date
+        portfolioBenchmark = Portfolio(self.market)
+        portfolioBenchmark = readPortfolio(self.market, asofDate, 'Yahoo')
 
         # Positions actually selected to be added to or removed from portfolio
         positionsNewSelected = []
@@ -309,14 +308,25 @@ class Portfolio:
             samplePortfolio = Portfolio(self.market)
             samplePortfolio.readCsv(self.market + '-sample.csv')
             stockInfoHash = readSectorFile(self.market)
-            NUM_DAILY_POSITIONS = 2
+            if self.market == 'US-tradehero' or self.market == 'LSE-tradehero':
+                NUM_DAILY_POSITIONS = 1
+            else:
+                NUM_DAILY_POSITIONS = 1
             numSamplePositions = min(len(samplePortfolio.positions), NUM_DAILY_POSITIONS)
             if numSamplePositions > 0:
                 j = 0
                 positionIndex = 0
                 while j < numSamplePositions and positionIndex < len(samplePortfolio.positions):
                     samplePosition = samplePortfolio.positions[positionIndex]
-                    if (not samplePosition in self.positions) and (not samplePosition in positionsRemoved):
+                    cutoffDate = 20151014
+                    # If on or before cutoffDate, only check positionsRemoved (to be consistent
+                    # with picks up to now); after cutoffDate, check benchmark portfolio instead
+                    if ((asofDate <= cutoffDate and
+                         (not samplePosition in self.positions) and
+                         (not samplePosition in positionsRemoved)) or
+                        (asofDate > cutoffDate and
+                         (not samplePosition in self.positions) and
+                         (samplePosition in portfolioBenchmark.positions))):
                         samplePosition.entryDate = asofDate
                         self.positions.append(samplePosition)
                         positionsNewSelected.append(samplePosition)
@@ -442,13 +452,13 @@ class Portfolio:
         for position in [p for p in self.positions if p.entryDate <= asofDate]:
             symbol = position.symbol
 
-            #if symbol == 'BVS.L' and asofDate == 20150812:
+            #if symbol == 'UNM' and asofDate == 20151231:
             #    pdb.set_trace()
 
             # Get exit price; adjust based on this day's closing price (closing prices
             # are adjusted in the Yahoo data, but open, high and low prices are not!)
             lastDate = datetime(*getDateComponents(str(asofDate)))
-            lastDateIndex = pricesAdjClose.index.searchsorted(lastDate)
+            lastDateIndex = min(len(pricesAdjClose) - 1, pricesAdjClose.index.searchsorted(lastDate))
             exitPrice = pricesAdjClose.ix[lastDateIndex][symbol]
             if position.exitDate > 0:
                 exitDate = datetime(*getDateComponents(str(position.exitDate)))
@@ -472,6 +482,10 @@ class Portfolio:
 
             # For below calcs, see also lsepx.xlsx
             if position.direction == 'Short':
+                #print symbol, entryPrice
+                # Hardcoding AV's entry price (for some reason, prices prior to 3-Dec-2015 disappeared on Yahoo Finance -- as of 31-Dec-2015)
+                if symbol == 'AV':
+                    entryPrice = 14.79
                 numShares = max(1, int(float(POSITION_SIZE) / float(entryPrice) / MARGIN))
                 multiplier = MARGIN
                 direction = -1.0
@@ -483,49 +497,49 @@ class Portfolio:
             currentAmount = numShares * exitPrice * multiplier
             retAmount = (currentAmount - entryAmount) * direction / multiplier
             ret = 100.0 * retAmount / entryAmount
+            """
+            maxDates = len(pricesAdjClose.index)
+            if position.entryDate == 0:
+                entryDate = ''
+            else:
+                entryDateTimestamp = datetime(*getDateComponents(str(position.entryDate)))
+                nextEntryDateIndex = pricesAdjClose.index.searchsorted(entryDateTimestamp) + 1
+                if nextEntryDateIndex < maxDates:
+                    entryDate = int(str(pricesAdjClose.index[nextEntryDateIndex])[:10].replace('-', ''))
+                else:
+                    entryDate = currentDate
+            if position.exitDate == 0:
+                exitDate = ''
+            else:
+                exitDateTimestamp = datetime(*getDateComponents(str(position.exitDate)))
+                nextExitDateIndex = pricesAdjClose.index.searchsorted(exitDateTimestamp) + 1
+                if nextExitDateIndex < maxDates:
+                    exitDate = int(str(pricesAdjClose.index[nextExitDateIndex])[:10].replace('-', ''))
+                else:
+                    exitDate = currentDate
+            """
+            if position.entryDate == 0:
+                entryDate = ''
+            else:
+                entryDate = position.entryDate
+            if position.exitDate == 0:
+                exitDate = ''
+            else:
+                exitDate = position.exitDate
+            performance = Performance(self.market,
+                                      symbol,
+                                      position.direction,
+                                      numShares,
+                                      entryDate,
+                                      exitDate,
+                                      entryPrice,
+                                      exitPrice,
+                                      entryAmount,
+                                      currentAmount,
+                                      retAmount,
+                                      ret)
+            performances.append(performance)
             if verbose:
-                """
-                maxDates = len(pricesAdjClose.index)
-                if position.entryDate == 0:
-                    entryDate = ''
-                else:
-                    entryDateTimestamp = datetime(*getDateComponents(str(position.entryDate)))
-                    nextEntryDateIndex = pricesAdjClose.index.searchsorted(entryDateTimestamp) + 1
-                    if nextEntryDateIndex < maxDates:
-                        entryDate = int(str(pricesAdjClose.index[nextEntryDateIndex])[:10].replace('-', ''))
-                    else:
-                        entryDate = currentDate
-                if position.exitDate == 0:
-                    exitDate = ''
-                else:
-                    exitDateTimestamp = datetime(*getDateComponents(str(position.exitDate)))
-                    nextExitDateIndex = pricesAdjClose.index.searchsorted(exitDateTimestamp) + 1
-                    if nextExitDateIndex < maxDates:
-                        exitDate = int(str(pricesAdjClose.index[nextExitDateIndex])[:10].replace('-', ''))
-                    else:
-                        exitDate = currentDate
-                """
-                if position.entryDate == 0:
-                    entryDate = ''
-                else:
-                    entryDate = position.entryDate
-                if position.exitDate == 0:
-                    exitDate = ''
-                else:
-                    exitDate = position.exitDate
-                performance = Performance(self.market,
-                                          symbol,
-                                          position.direction,
-                                          numShares,
-                                          entryDate,
-                                          exitDate,
-                                          entryPrice,
-                                          exitPrice,
-                                          entryAmount,
-                                          currentAmount,
-                                          retAmount,
-                                          ret)
-                performances.append(performance)
                 print str(performance)
 
             totEntryAmount += entryAmount
@@ -542,7 +556,7 @@ class Portfolio:
         sectorPositions, sectorPercent = calcSectorPercent(self, stockInfoHash)
 
         print('----------------------------------------------')
-        print '              Sector:  Nlng Nshrt  Plng Pshrt'
+        print '              Sector:  Nlng Nshrt  Plng  Pshrt'
         print('----------------------------------------------')
         for sectorName in sectorPositions.keys():
             print ('%20s: %5.0f %5.0f %5.1f %5.1f') % (sectorName,
@@ -619,9 +633,9 @@ def readDiffs(filename):
             positionsRemoved.append(position)
     return positionsNew, positionsRemoved
 
-#--------------------------------------------------
-# Read new and removed positions from a diffs file
-#--------------------------------------------------
+#-------------------------------------------------
+# Write new and removed positions to a diffs file
+#-------------------------------------------------
 def writeDiffs(positionsNew, positionsRemoved, filename):
     f = open(filename, 'w')
     for position in positionsNew:
@@ -651,7 +665,7 @@ def readPortfolio(market, date, source):
         portfolio.readExcel(date + '.xlsx')
     elif source == 'Outlook':
         # Read from Outlook mail message (which has been saved automatically)
-        if market == 'US':
+        if getMarket(market) == 'US':
             filename = glob.glob('c:/mails/*_ ' + 'P ' + getMatchStr(date) + '.txt')[0]
             portfolio.readOutlookUS(filename)
         else:
@@ -659,22 +673,22 @@ def readPortfolio(market, date, source):
             portfolio.readOutlookLSE(filename)
     elif source == 'Yahoo':
         # Read from Yahoo mail (or from text file, if it exists)
-        filename = market + '-' + str(date) + '.csv'
+        filename = getMarket(market) + '-' + str(date) + '.csv'
         if os.path.exists(filename):
             portfolio.readCsv(filename)
         else:
-            if market == 'US':
+            if getMarket(market) == 'US':
                 subject = 'P ' + getMatchStr(date)
             else:
                 subject = 'LSE ' + getMatchStr(date)
             portfolio.readMail(subject)
-            f = open(filename, 'w')
-            for position in portfolio.positions:
-                f.write(str(position) + '\n')
-            f.close()
+            #f = open(filename, 'w')
+            #for position in portfolio.positions:
+            #    f.write(str(position) + '\n')
+            #f.close()
 
     return portfolio
-    
+
 #-------------------------------------------------------------------------------------------
 # Return year, month and day given a standard date (e.g. for 20150710, return (2015, 7, 10)
 #-------------------------------------------------------------------------------------------
@@ -688,7 +702,7 @@ def getDateComponents(stdStr):
 #-----------------------------------------------------------------------------------------
 # Return correct match string given a standard date (e.g. for 20150710, return 10-Jul-15)
 #-----------------------------------------------------------------------------------------
-def getMatchStr(stdStr):
+def getMatchStr(stdStr, showFullYear=False):
     if stdStr == '':
         return ''
     else:
@@ -696,11 +710,12 @@ def getMatchStr(stdStr):
         month = int(stdStr[4:6])
         day = int(stdStr[6:8])
         monthName = time.strftime('%b', (year, month, day, 0, 0, 0, 0, 0, 0))
-        return str(day) + '-' + monthName + '-' + stdStr[2:4]
+        yearStart = 0 if showFullYear else 2
+        return str(day) + '-' + monthName + '-' + stdStr[yearStart:4]
 
-#---------------------------------------------------------------------------------
-# Return standard date given a match date (e.g. for 10-Jul-2015, return 20150710)
-#---------------------------------------------------------------------------------
+#-------------------------------------------------------------------------------
+# Return standard date given a match date (e.g. for 10-Jul-15, return 20150710)
+#-------------------------------------------------------------------------------
 def getStdStr(matchStr):
     months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
     day = matchStr[:matchStr.index('-')].zfill(2)
@@ -714,7 +729,7 @@ def getStdStr(matchStr):
 #---------------------------------
 def getDates(market):
     dates = []
-    f = open(market + '-dates.csv')
+    f = open(getMarket(market) + '-dates.csv')
     for line in f:
         data = line.strip()
         dates.append(int(data))
@@ -727,7 +742,7 @@ def updateDates(market):
     # Read dates from file
     dates = []
     try:
-        f = open(market + '-dates.csv')
+        f = open(getMarket(market) + '-dates.csv')
         for line in f:
             data = line.strip()
             dates.append(data)
@@ -739,16 +754,16 @@ def updateDates(market):
     except:
         lastDate = 0
 
-    if market == 'US':
+    if getMarket(market) == 'US':
         fileMarketIndic = 'P '
     else:
         fileMarketIndic = 'LSE '
 
     # Read emails and keep a newDates list in order to update dates file
     connection = imaplib.IMAP4_SSL('imap.mail.yahoo.com')
-    connection.login('pnikoulis', 'AgiouNikolaou12')
-    connection.select()
-    typ, data = connection.search(None, 'FROM', 'nmitsiou@gmail.com')
+    connection.login('pnikoulis', 'ai024709th3669')
+    connection.select(readonly=True)
+    typ, data = connection.search(None, 'ALL')
     ids = data[0].split()
     numIds = len(ids)
     newDates = []
@@ -757,6 +772,7 @@ def updateDates(market):
         typ, data = connection.fetch(id, '(RFC822)')
         message = email.message_from_string(data[0][1])
         subject = message['Subject']
+
         # These are all emails that contain portfolio data (including replies and forwards)
         try:
             foundIndic = subject.find(fileMarketIndic)
@@ -776,28 +792,44 @@ def updateDates(market):
             if (not os.path.exists(filename)) or os.stat(filename).st_size == 0:
                 print 'Saving', filename
                 benchmarkPortfolio = Portfolio(market)
-                payload = message.get_payload()
-                while isinstance(payload[0], email.message.Message):
-                    payload = payload[0].get_payload()
-                    strings = payload.split()
-                    positions = getPositionsFromStrings(strings)
-                benchmarkPortfolio.positions = positions
+                benchmarkPortfolio.positions = getPositionsFromMessage(message)
                 benchmarkPortfolio.writeCsv(filename)
 
     # Update dates file
     newDates = sorted(newDates)
-    f = open(market + '-dates.csv', 'a')
+    f = open(getMarket(market) + '-dates.csv', 'a')
     for date in newDates:
         f.write(str(date) + '\n')
     f.close()
     dates = getDates(market)
     return dates
 
+#-------------------------------------------------
+# Parse a message body and return positions array
+#-------------------------------------------------
+def getPositionsFromMessage(message):
+    payload = message.get_payload()
+    while isinstance(payload[0], email.message.Message):
+        payload = payload[0].get_payload()
+    payload = payload.replace('=\r\n', '')
+    strings = payload.split()
+    positions = getPositionsFromStrings(strings)
+    return positions
+
+#---------------------------------------
+# Get market from market-version string
+#---------------------------------------
+def getMarket(market):
+    if '-' in market:
+        return market[:market.index('-')]
+    else:
+        return market
+
 #------------------
 # Read sector file
 #------------------
 def readSectorFile(market):
-    filename = 'sectors-' + market + '.txt'
+    filename = 'sectors-' + getMarket(market) + '.txt'
     f = open(filename)
     stockInfoHash = {}
     for line in f:
@@ -815,7 +847,7 @@ def writeSectorFile(market, stockInfoHash):
     currentSymbols = currentStockInfoHash.keys()
 
     # Add stocks that are not in current sector file
-    filename = 'sectors-' + market + '.txt'
+    filename = 'sectors-' + getMarket(market) + '.txt'
     f = open(filename, 'a')
     for symbol in stockInfoHash.keys():
         if symbol not in currentSymbols:
@@ -850,7 +882,7 @@ def calcSectorPercent(portfolio, stockInfoHash):
             sectorPercent[sectorName][direction] = 0
 
     for position in portfolio.positions:
-        if (stockInfoHash.get(position.symbol) != None and 
+        if (stockInfoHash.get(position.symbol) != None and
             stockInfoHash.get(position.symbol).sector != None and
             stockInfoHash.get(position.symbol).sector != ''):
             sectorName = stockInfoHash[position.symbol].sector
@@ -910,7 +942,7 @@ if __name__ == '__main__':
     # Only the Yahoo and Outlook sources support searching for the last two dates
     SOURCE = 'Yahoo'
     market = sys.argv[1]
-    if market == 'US':
+    if getMarket(market) == 'US':
         fileMarketIndic = 'P '
     else:
         fileMarketIndic = 'LSE '

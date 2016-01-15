@@ -14,12 +14,12 @@ if __name__ == '__main__':
 
     market = sys.argv[1]
     #portfolio = Portfolio(market)
-    #portfolio.readMail('P 1-Jun-15')
+    #portfolio.readMail('P 14-Oct-15')
     #pdb.set_trace()
 
     dates = updateDates(market)
     for date in dates:
-        filename = market + '-' + str(date) + '.csv'
+        filename = getMarket(market) + '-' + str(date) + '.csv'
         if not os.path.exists(filename):
             print 'Saving', filename
             benchmarkPortfolio = readPortfolio(market, date, 'Yahoo')

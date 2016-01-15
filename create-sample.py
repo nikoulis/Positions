@@ -20,15 +20,15 @@ if __name__ == '__main__':
 
     # Read benchmark portfolio
     benchmarkPortfolio = Portfolio(market)
-    benchmarkPortfolio.readCsv(market + '-' + str(asofDate) + '.csv')
+    benchmarkPortfolio.readCsv(getMarket(market) + '-' + str(asofDate) + '.csv')
 
     # Exclude symbols in foreign markets, or without sectors, or without market caps,
     # or where market cap < $5bn (for the US portfolio only)
-    stockInfoHash = readSectorFile(market)
+    stockInfoHash = readSectorFile(getMarket(market))
     sectorSymbols = [s for s in stockInfoHash.keys()
-                     if (s.find('.') == -1 or market == 'LSE') and
+                     if (s.find('.') == -1 or getMarket(market) == 'LSE') and
                      stockInfoHash[s].sector != '' and 
-                     (stockInfoHash[s].marketCapNum > 5000 or market == 'LSE')]
+                     (stockInfoHash[s].marketCapNum > 5000 or getMarket(market) == 'LSE')]
     benchmarkPortfolio.positions = [p for p in benchmarkPortfolio.positions if p.symbol in sectorSymbols]
     # Calculate sector percentages and sample accordingly
     benchmarkSectorPositions, benchmarkSectorPercent = calcSectorPercent(benchmarkPortfolio, stockInfoHash)

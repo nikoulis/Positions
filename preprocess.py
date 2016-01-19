@@ -3,6 +3,7 @@ sys.path.append('/home/nikoulis/anaconda/lib/python2.7/site-packages')  # For Ub
 import os
 import pdb
 from diffs import *
+from shutil import copyfile
 
 #-------------------------------------------------------------------------
 # Update dates file and make sure all benchmark files are updated as well

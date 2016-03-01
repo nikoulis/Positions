@@ -52,4 +52,7 @@ if __name__ == '__main__':
         filename = market + '-diffs-' + str(dates[i + 1]) + '.csv'
         if not os.path.exists(filename):
             calcDiffs(market, dates[i], str(dates[i + 1]), 'Yahoo')
-        portfolio.update(dates[i + 1], display=True)
+        if market == 'US' or market == 'US-tradehero' or (market == 'LSE' and dates[i + 1] != 20160122 and dates[i + 1] != 20160125):
+            # Don't update for these two dates for LSE (to be consistent with what happened
+            # when we ran out of stocks on 20160122
+            portfolio.update(dates[i + 1], dates[i], display=True)

@@ -34,6 +34,8 @@ class Performance:
     def __init__(self,
                  market='US',
                  symbol='',
+                 name = '',
+                 sector = '',
                  direction='',
                  numShares=0,
                  entryDate=0,
@@ -47,10 +49,9 @@ class Performance:
         util.initFromArgs(self)
 
     def __str__(self):
-        stockInfoHash = readSectorFile(self.market)
         return '%-8s %-30s %-5s %5s %9s %9s %8.2f %8.2f %8.2f %8.2f %8.2f %7.2f%%' % (
             self.symbol,
-            stockInfoHash[self.symbol].name[:30],
+            self.name,
             self.direction,
             self.numShares,
             getMatchStr(str(self.entryDate)),
@@ -61,6 +62,38 @@ class Performance:
             self.currentAmount,
             self.retAmount,
             self.ret)
+
+    def toTxt(self):
+        return '%s|%s|%s|%s|%s|%s|%s|%f|%f|%f|%f|%f|%f' % (
+            self.symbol,
+            self.name,
+            self.sector,
+            self.direction,
+            self.numShares,
+            str(self.entryDate),
+            str(self.exitDate),
+            self.entryPrice,
+            self.exitPrice,
+            self.entryAmount,
+            self.currentAmount,
+            self.retAmount,
+            self.ret)
+
+    def readTxt(self, line):
+        data = line.strip().split('|')
+        self.symbol = data[0]
+        self.name = data[1]
+        self.sector = data[2]
+        self.direction = data[3]
+        self.numShares = int(data[4])
+        self.entryDate = int(data[5])
+        self.exitDate = int(data[6]) if data[6] != '' else 0
+        self.entryPrice = float(data[7])
+        self.exitPrice = float(data[8])
+        self.entryAmount = float(data[9])
+        self.currentAmount = float(data[10])
+        self.retAmount = float(data[11])
+        self.ret = float(data[12])
 
 #------------------------
 # Portfolio return class
@@ -290,7 +323,7 @@ class Portfolio:
     #------------------------------------------------------------------------
     # Update portfolio based on diffs or a sample portfolio for a given date
     #------------------------------------------------------------------------
-    def update(self, asofDate, display=False):
+    def update(self, asofDate, asofPrevDate, display=False):
         # Read diffs file
         positionsNew, positionsRemoved = readDiffs(self.market + '-diffs-' + str(asofDate) + '.csv')
 
@@ -318,6 +351,7 @@ class Portfolio:
                 positionIndex = 0
                 while j < numSamplePositions and positionIndex < len(samplePortfolio.positions):
                     samplePosition = samplePortfolio.positions[positionIndex]
+                    #print samplePosition
                     cutoffDate = 20151014
                     # If on or before cutoffDate, only check positionsRemoved (to be consistent
                     # with picks up to now); after cutoffDate, check benchmark portfolio instead
@@ -333,8 +367,31 @@ class Portfolio:
                         j += 1
                     positionIndex += 1
 
-                if display:
-                    self.showStats(stockInfoHash)
+                #---------------------------------------------------------------------------------
+                # If we reached our limit, remove a number of positions to make room for new ones
+                #---------------------------------------------------------------------------------
+                MAX_POSITIONS = 100
+                openPositions = [p for p in self.positions if p.exitDate == 0]
+                if len(openPositions) > MAX_POSITIONS:
+                    # 1. Read raw performance file and sort by group (sector+direction)
+                    performances = readPerformances(self.market + '-rawperf-' + str(asofPrevDate) + '.txt')
+                    groups = {}
+                    for performance in performances:
+                        k = performance.sector + '-' + performance.direction
+                        if groups.get(k) is None:
+                            groups[k] = []
+                        groups[k].append((performance.symbol, performance.ret))
+                    for k in groups.keys():
+                        groups[k] = sorted(groups[k], key=lambda t: t[1])
+
+                    # 2. Remove positions from the same group as ones added (picking worst performance ones first)
+                    posId = 0
+                    for position in positionsNewSelected:
+                        k = stockInfoHash[position.symbol].sector + '-' + position.direction
+                        position = [p for p in self.positions if p.symbol == groups[k][posId][0]][0]
+                        #self.positions.remove(position)
+                        positionsRemoved.append(position)
+                        posId += 1                
                 self.writeCsv(self.market + '-portfolio.csv')
         else:
             # Add all new positions to global portfolio, if not already there
@@ -367,6 +424,8 @@ class Portfolio:
         newPortfolio.writeCsv(self.market + '-portfolio.csv')
         newPortfolio.writeCsv(self.market + '-portfolio-' + str(asofDate) + '.csv')
         writeDiffs(positionsNewSelected, positionsRemovedSelected, self.market + '-new-removed-' + str(asofDate) + '.csv')
+        if display:
+            self.showStats(stockInfoHash)
 
     #----------------------------------
     # Download prices from Yahoo Finance
@@ -379,8 +438,6 @@ class Portfolio:
         i = 0
         for position in self.positions:
             symbol = position.symbol
-            #if symbol == 'ARR':
-            #    pdb.set_trace()
             allData = DataReader(normalizeSymbol(symbol), 'yahoo', datetime(2015, 4, 22), endDate)
             print allData.tail(10)
 
@@ -449,6 +506,8 @@ class Portfolio:
             print '-----------------------------------------------------------------------------------------------------------------------------'
             print 'Portfolio                               Dir   #Shrs  Entry Dt   Exit Dt Entry Px  Exit Px  Entry $   Exit $      P&L   Return'
             print '-----------------------------------------------------------------------------------------------------------------------------'
+
+        stockInfoHash = readSectorFile(self.market)
         for position in [p for p in self.positions if p.entryDate <= asofDate]:
             symbol = position.symbol
 
@@ -528,6 +587,8 @@ class Portfolio:
                 exitDate = position.exitDate
             performance = Performance(self.market,
                                       symbol,
+                                      stockInfoHash[symbol].name[:30],
+                                      stockInfoHash[symbol].sector,
                                       position.direction,
                                       numShares,
                                       entryDate,
@@ -565,8 +626,8 @@ class Portfolio:
                                                        sectorPercent[sectorName]['Long'],
                                                        sectorPercent[sectorName]['Short'])
         print('----------------------------------------------')
-        totalLong = len([p for p in self.positions if p.direction == 'Long'])
-        totalShort = len([p for p in self.positions if p.direction == 'Short'])
+        totalLong = len([p for p in self.positions if p.direction == 'Long' and p.exitDate == 0])
+        totalShort = len([p for p in self.positions if p.direction == 'Short' and p.exitDate == 0])
         total = totalLong + totalShort
         if total == 0:
             pctLong = 0
@@ -688,6 +749,18 @@ def readPortfolio(market, date, source):
             #f.close()
 
     return portfolio
+
+#------------------------------------------
+# Read a performance file given a filename
+#------------------------------------------
+def readPerformances(filename):
+    performances = []
+    f = open(filename)
+    for line in f:
+        performance = Performance()
+        performance.readTxt(line)
+        performances.append(performance)
+    return performances
 
 #-------------------------------------------------------------------------------------------
 # Return year, month and day given a standard date (e.g. for 20150710, return (2015, 7, 10)
@@ -881,7 +954,8 @@ def calcSectorPercent(portfolio, stockInfoHash):
             sectorPositions[sectorName][direction] = []
             sectorPercent[sectorName][direction] = 0
 
-    for position in portfolio.positions:
+    openPositions = [p for p in portfolio.positions if p.exitDate == 0]
+    for position in openPositions:
         if (stockInfoHash.get(position.symbol) != None and
             stockInfoHash.get(position.symbol).sector != None and
             stockInfoHash.get(position.symbol).sector != ''):
@@ -899,7 +973,7 @@ def calcSectorPercent(portfolio, stockInfoHash):
             else:
                 sectorPercent[sectorName][direction] = 100.0 * float(numSectorPositions) / float(numPositions)
 
-    #print 'Num stocks with identified sectors: %d out of %d' % (numPositions, len(portfolio.positions))
+    print 'Num stocks with identified sectors: %d out of %d' % (numPositions, len(openPositions))
     return sectorPositions, sectorPercent
 
 #--------------------------------------------------------

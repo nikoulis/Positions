@@ -47,10 +47,12 @@ if __name__ == '__main__':
     # by the time preprocess.py runs, or if the email subject is wrong); in that case, the performance
     # report isn't updated either.  If preprocess.py doesn't find a new email to save (and to update the
     # dates.csv file), then yesterday's benchmark file will still be there, saved with yesterday's date.
-    filename = getMarket(market) + '-' + str(asofDate) + '.csv'
-    fileSavedDate = int(datetime.strptime(time.ctime(os.path.getctime(filename)), "%a %b %d %H:%M:%S %Y").strftime('%Y%m%d'))
-    if fileSavedDate != currentDate and fileSavedDate not in holidays:
-        sys.exit()
+    # However, for LSE run anyway (file will have been saved at the end of the previous day).
+    # -------- NOW OBSOLETE - FILE GETS SAVED (COPIED) AUTOMATICALLY AT THE END OF PREVIOUS BUSINESS DAY ---------
+    #filename = getMarket(market) + '-' + str(asofDate) + '.csv'
+    #fileSavedDate = int(datetime.strptime(time.ctime(os.path.getctime(filename)), "%a %b %d %H:%M:%S %Y").strftime('%Y%m%d'))
+    #if fileSavedDate != currentDate and fileSavedDate not in holidays and market not in ('LSE', 'LSE-tradehero'):
+    #    sys.exit()
 
     #asofDate = time.strftime('%Y%m%d')
     portfolio = Portfolio(market)
@@ -76,6 +78,10 @@ if __name__ == '__main__':
     else:
         startDateIndex = dates.index(inceptionDate)
     date = asofDate
+
+    # Save performance info in file
+    filename = market + '-rawperf-' + str(asofDate) + '.txt'
+    outf = open(filename, 'w')
 
     # From this point on, redirect output to file
     filename = market + '-perf-' + str(asofDate) + '.txt'
@@ -118,6 +124,8 @@ if __name__ == '__main__':
             calcPortRets.append(calcPortRet)
     else:
         totEntryAmount, totCurrentAmount, totRetAmount, totRet, performances = portfolio.calcPerformance(asofDate, verbose)
+        for performance in performances:
+            outf.write(performance.toTxt() + '\n')
 
     #-------------------------------------------------------------------------
     # Now present the trades in a different format (similar to the Excel file

@@ -113,7 +113,8 @@ if __name__ == '__main__':
         data = line.split(',')
         symbol = data[1].strip()
         name, sector, industry, marketCap = getYahooFinanceData(symbol)
-        
-        print str(i) + ': ' + originalSymbol  + '|' + name + '|' + sector + '|' + industry + '|' + marketCap
-        out.write(originalSymbol  + '|' + name + '|' + sector + '|' + industry + '|' + marketCap + '\n')
+
+        print i
+        #print str(i) + ': ' + symbol  + '|' + str(name.encode('utf-8')) + '|' + sector + '|' + industry + '|' + marketCap
+        out.write(symbol  + '|' + name + '|' + sector + '|' + industry + '|' + marketCap + '\n')
         i += 1

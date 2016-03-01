@@ -7,7 +7,7 @@ import os
 #-------------------------
 if __name__ == '__main__':
     if len(sys.argv) < 2:
-        print 'Usage: analyze-hist.py <US/LSE> <yyyymmdd>'
+        print 'Usage: analyze-port.py <US/LSE> <yyyymmdd>'
         sys.exit()
 
     market = sys.argv[1]

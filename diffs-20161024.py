@@ -138,16 +138,8 @@ class Position:
 
     # To see if 'other' position is in portfolio, check if symbols (without _entryDate) are equal and if exitDate is zero
     def __eq__(self, other):
-        if self.symbol.find('_') < 0:
-            symbol = self.symbol
-        else:
-            symbol = self.symbol[:self.symbol.find('_')]
-        if other.symbol.find('_') < 0:
-            otherSymbol = other.symbol
-        else:
-            otherSymbol = other.symbol[:other.symbol.find('_')]
         return (self.direction == other.direction and
-                symbol == otherSymbol and
+                self.symbol[:self.symbol.find('_')] == other.symbol[:other.symbol.find('_')] and
                 self.exitDate ==  0)
 
 #------------------------------------
@@ -374,37 +366,30 @@ class Portfolio:
 
             numSamplePositions = min(len(samplePortfolio.positions), NUM_DAILY_POSITIONS)
             if numSamplePositions > 0:
-                cutoffDate = 20151014
-                # If on or before cutoffDate, only check positionsRemoved (to be consistent
-                # with picks up to now); after cutoffDate, check benchmark portfolio instead
-                if asofDate <= cutoffDate:
-                    j = 0
-                    positionIndex = 0
-                    while j < numSamplePositions and positionIndex < len(samplePortfolio.positions):
-                        samplePosition = samplePortfolio.positions[positionIndex]
-                        print samplePosition
-                        if ((not self.inPositions(samplePosition)) and
-                             (not samplePosition in positionsRemoved)):
-                            samplePosition.symbol = samplePosition.symbol[:samplePosition.symbol.find('_')] + '_' + str(asofDate)
-                            samplePosition.entryDate = asofDate
-                            self.positions.append(samplePosition)
-                            positionsNewSelected.append(samplePosition)
-                            j += 1
-                        positionIndex += 1
-                else:
-                    # Just take the next position from sample file
-                    j = 0
-                    positionIndex = len(self.positions)
-                    while j < numSamplePositions and positionIndex < len(samplePortfolio.positions):
-                        samplePosition = samplePortfolio.positions[positionIndex]
-                        if samplePosition in portfolioBenchmark.positions:
-                            samplePosition.symbol = samplePosition.symbol[:samplePosition.symbol.find('_')] + '_' + str(asofDate)
-                            samplePosition.entryDate = asofDate
-                            self.positions.append(samplePosition)
-                            positionsNewSelected.append(samplePosition)
-                            j += 1
-                        positionIndex += 1
+                j = 0
+                positionIndex = 0
+                while j < numSamplePositions and positionIndex < len(samplePortfolio.positions):
+                    samplePosition = samplePortfolio.positions[positionIndex]
+                    print samplePosition
+                    cutoffDate = 20151014
+                    # If on or before cutoffDate, only check positionsRemoved (to be consistent
+                    # with picks up to now); after cutoffDate, check benchmark portfolio instead
+                    if ((asofDate <= cutoffDate and
+                         (not self.inPositions(samplePosition)) and
+                         (not samplePosition in positionsRemoved)) or
+                        (asofDate > cutoffDate and
+                         (not self.inPositions(samplePosition)) and
+                         (samplePosition in portfolioBenchmark.positions))):
+                        samplePosition.symbol = samplePosition.symbol[:samplePosition.symbol.find('_')] + '_' + str(asofDate)
+                        samplePosition.entryDate = asofDate
+                        self.positions.append(samplePosition)
+                        positionsNewSelected.append(samplePosition)
+                        j += 1
+                    positionIndex += 1
                     
+                if asofDate == 20160225: # and samplePosition.symbol[:5] == 'LXB.L':
+                    pdb.set_trace()
+
                 #---------------------------------------------------------------------------------
                 # If we reached our limit, remove a number of positions to make room for new ones
                 #---------------------------------------------------------------------------------
@@ -452,7 +437,7 @@ class Portfolio:
                     s.write(p.symbol[:p.symbol.find('_')] + ',' + sector + ',' + str(marketCapNum) + '\n')
                     s.close()
             f.close()
-            
+
         # Set exit date for removed positions
         self.readCsv(self.market + '-portfolio.csv')
         newPortfolio = Portfolio(self.market)
@@ -460,10 +445,6 @@ class Portfolio:
             positionSymbol = position.symbol[:position.symbol.find('_')]
             removedSymbols = [p.symbol for p in positionsRemoved]
             if position in positionsRemoved or (positionSymbol in removedSymbols and position.exitDate == 0):
-
-                if asofDate == 20151127:
-                    pdb.set_trace()
-
                 position.exitDate = asofDate
                 print 'Set exitDate of', str(position)
                 positionsRemovedSelected.append(position)
@@ -483,13 +464,8 @@ class Portfolio:
         pricesCloseFilename = 'close-prices-' + self.market + '.csv'
 
         i = 0
-        symbols = []
         for position in self.positions:
             symbol = position.symbol[:position.symbol.find('_')]
-            # Ignore duplicate symbols
-            if symbol in symbols:
-                continue
-            symbols.append(symbol)
             try:
                 allData = DataReader(normalizeSymbol(symbol), 'yahoo', datetime(2015, 4, 22), endDate)
             except IOError:
@@ -611,7 +587,27 @@ class Portfolio:
             currentAmount = numShares * exitPrice * multiplier
             retAmount = (currentAmount - entryAmount) * direction / multiplier
             ret = 100.0 * retAmount / entryAmount
-            
+            """
+            maxDates = len(pricesAdjClose.index)
+            if position.entryDate == 0:
+                entryDate = ''
+            else:
+                entryDateTimestamp = datetime(*getDateComponents(str(position.entryDate)))
+                nextEntryDateIndex = pricesAdjClose.index.searchsorted(entryDateTimestamp) + 1
+                if nextEntryDateIndex < maxDates:
+                    entryDate = int(str(pricesAdjClose.index[nextEntryDateIndex])[:10].replace('-', ''))
+                else:
+                    entryDate = currentDate
+            if position.exitDate == 0:
+                exitDate = ''
+            else:
+                exitDateTimestamp = datetime(*getDateComponents(str(position.exitDate)))
+                nextExitDateIndex = pricesAdjClose.index.searchsorted(exitDateTimestamp) + 1
+                if nextExitDateIndex < maxDates:
+                    exitDate = int(str(pricesAdjClose.index[nextExitDateIndex])[:10].replace('-', ''))
+                else:
+                    exitDate = currentDate
+            """
             if position.entryDate == 0:
                 entryDate = ''
             else:

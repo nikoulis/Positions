@@ -16,7 +16,7 @@ if __name__ == '__main__':
         dates = getDates(market)
         asofDate = dates[-1]
 
-    NUM_SAMPLE_POSITIONS = 100
+    NUM_SAMPLE_POSITIONS = 400
 
     # Read benchmark portfolio
     benchmarkPortfolio = Portfolio(market)

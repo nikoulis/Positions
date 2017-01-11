@@ -72,9 +72,10 @@ def normalizeSymbol(symbol):
 def getYahooFinanceData(symbol):
     symbol = normalizeSymbol(symbol)
     # Get name and market cap
-    url = 'http://finance.yahoo.com/q/ks?s=' + symbol + '+Key+Statistics'
+    url = 'http://finance.yahoo.com/quote/' + symbol + '/key-statistics?ltr=1'
     page = requests.get(url)
     soup = BeautifulSoup(page.text)
+    pdb.set_trace()
     tag = soup.find(text=re.compile('Market Cap'))
     marketCap = getData(tag)
     tag = soup.findAll('h2')
@@ -111,7 +112,7 @@ if __name__ == '__main__':
     i = 1
     for line in f:
         data = line.split(',')
-        symbol = data[1].strip()
+        symbol = data[0].strip()
         name, sector, industry, marketCap = getYahooFinanceData(symbol)
 
         print i

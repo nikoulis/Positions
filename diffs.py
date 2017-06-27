@@ -8,8 +8,9 @@ import os
 import pdb
 import pandas as pd
 from datetime import datetime
-from pandas.io.data import DataReader
+from pandas_datareader import data
 from sectors import *
+import math
 import util
 
 #------------------------------------------------------------------
@@ -393,6 +394,8 @@ class Portfolio:
                         positionIndex += 1
                 else:
                     # Just take the next position from sample file
+                    # (When adding new stocks to sample file, they should be *closed* stocks from portfolio.csv
+                    # and they must *exist* in yyyymmdd.csv)
                     j = 0
                     positionIndex = len(self.positions)
                     while j < numSamplePositions and positionIndex < len(samplePortfolio.positions):
@@ -402,6 +405,7 @@ class Portfolio:
                             samplePosition.entryDate = asofDate
                             self.positions.append(samplePosition)
                             positionsNewSelected.append(samplePosition)
+                            print 'Add ' + samplePosition.symbol
                             j += 1
                         positionIndex += 1
                     
@@ -482,6 +486,8 @@ class Portfolio:
         pricesAdjCloseFilename = 'adjclose-prices-' + self.market + '.csv'
         pricesCloseFilename = 'close-prices-' + self.market + '.csv'
 
+        dataSource = 'google'
+        
         i = 0
         symbols = []
         for position in self.positions:
@@ -491,14 +497,18 @@ class Portfolio:
                 continue
             symbols.append(symbol)
             try:
-                allData = DataReader(normalizeSymbol(symbol), 'yahoo', datetime(2015, 4, 22), endDate)
-            except IOError:
-                pass
+                allData = data.DataReader(normalizeSymbol(symbol), dataSource, datetime(2015, 4, 22), endDate)
+            except IOError, e:
+                print e
             print allData.tail(10)
 
             # Get open prices
             tsOpen = allData['Open']
-            dataOpen = pd.DataFrame(list(tsOpen.values), index=tsOpen.index, columns=[symbol])
+            try:
+                dataOpen = pd.DataFrame(list(tsOpen.values), index=tsOpen.index, columns=[symbol])
+            except ValueError:
+                dataOpen = pd.DataFrame([1] * len(dataOpen.index),
+                                        index=dataOpen.index, columns=[symbol])
             if i == 0:
                 pricesOpen = dataOpen
             else:
@@ -507,8 +517,15 @@ class Portfolio:
             print pricesOpen.tail(10)
 
             # Get adjusted close prices
-            tsAdjClose = allData['Adj Close']
-            dataAdjClose = pd.DataFrame(list(tsAdjClose.values), index=tsAdjClose.index, columns=[symbol])
+            if dataSource == 'yahoo':
+                tsAdjClose = allData['Adj Close']
+            elif dataSource == 'google':
+                tsAdjClose = allData['Close']
+            try:
+                dataAdjClose = pd.DataFrame(list(tsAdjClose.values), index=tsAdjClose.index, columns=[symbol])
+            except ValueError:
+                dataAdjClose = pd.DataFrame([1] * len(dataAdjClose.index),
+                                            index=dataAdjClose.index, columns=[symbol])
             if i == 0:
                 pricesAdjClose = dataAdjClose
             else:
@@ -518,7 +535,11 @@ class Portfolio:
 
             # Get unadjusted close prices
             tsClose = allData['Close']
-            dataClose = pd.DataFrame(list(tsClose.values), index=tsClose.index, columns=[symbol])
+            try:
+                dataClose = pd.DataFrame(list(tsClose.values), index=tsClose.index, columns=[symbol])
+            except ValueError:
+                dataClose = pd.DataFrame([1] * len(dataClose.index),
+                                         index=dataClose.index, columns=[symbol])   
             if i == 0:
                 pricesClose = dataClose
             else:
@@ -594,23 +615,58 @@ class Portfolio:
                 adjustmentFactor = pricesAdjClose.ix[nextOpenDateIndex][symbol] / pricesClose.ix[nextOpenDateIndex][symbol]
                 entryPrice = pricesOpen.ix[nextOpenDateIndex][symbol] * adjustmentFactor
 
+            #print symbol, entryPrice
+            if symbol == 'AV':
+                # Hardcoding AV's entry price (for some reason, prices prior to 3-Dec-2015 disappeared
+                # on Yahoo Finance -- as of 31-Dec-2015)
+                entryPrice = 14.79
+            elif symbol == 'HGG.L':
+                # Also hardcoding HGG.L's price (split on 30-May-2017 not reflected in Yahoo's adjusted prices)
+                entryPrice = 196.96
+                    
             # For below calcs, see also lsepx.xlsx
             if position.direction == 'Short':
-                #print symbol, entryPrice
-                # Hardcoding AV's entry price (for some reason, prices prior to 3-Dec-2015 disappeared on Yahoo Finance -- as of 31-Dec-2015)
-                if symbol == 'AV':
-                    entryPrice = 14.79
-                numShares = max(1, int(float(POSITION_SIZE) / float(entryPrice) / MARGIN))
+                try:
+                    numShares = max(1, int(float(POSITION_SIZE) / float(entryPrice) / MARGIN))
+                except:
+                    numShares = 100
                 multiplier = MARGIN
                 direction = -1.0
             else:
-                numShares = max(1, int(float(POSITION_SIZE) / float(entryPrice)))
+                try:
+                    numShares = max(1, int(float(POSITION_SIZE) / float(entryPrice)))
+                except:
+                    numShares = 100
                 multiplier = 1.0
                 direction = 1.0
+
+            if isinstance(entryPrice, str):
+                try:
+                    entryPrice = float(entryPrice)
+                except:
+                    entryPrice = 1
+            if isinstance(exitPrice, str):
+                try:
+                    exitPrice = float(exitPrice)
+                except:
+                    exitPrice = 1
+                
+            if math.isnan(entryPrice):
+                entryPrice = 1
+            if math.isnan(exitPrice):
+                exitPrice = 1
+                
             entryAmount = numShares * entryPrice * multiplier
             currentAmount = numShares * exitPrice * multiplier
             retAmount = (currentAmount - entryAmount) * direction / multiplier
             ret = 100.0 * retAmount / entryAmount
+
+            # Force zero return if too high or too low
+            if abs(ret) > 300:
+                exitPrice = entryPrice
+                currentAmount = entryAmount
+                retAmount = 0
+                ret = 0
             
             if position.entryDate == 0:
                 entryDate = ''
@@ -681,7 +737,7 @@ def readPricesFromFile(filename):
     prices = prices.fillna(method='pad')
     dateColumn = prices.columns[0]
     prices = prices.set_index(dateColumn)
-    prices.index = prices.index.to_datetime()
+    prices.index = pd.to_datetime(prices.index)
     return prices
 
 #-------------------------------------------------------------------------------------------

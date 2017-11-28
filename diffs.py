@@ -381,6 +381,8 @@ class Portfolio:
                 if asofDate <= cutoffDate:
                     j = 0
                     positionIndex = 0
+                    if asofDate == 20170913:
+                        pdb.set_trace()
                     while j < numSamplePositions and positionIndex < len(samplePortfolio.positions):
                         samplePosition = samplePortfolio.positions[positionIndex]
                         print samplePosition
@@ -414,6 +416,7 @@ class Portfolio:
                 #---------------------------------------------------------------------------------
                 MAX_POSITIONS = 100
                 openPositions = [p for p in self.positions if p.exitDate == 0]
+
                 if len(openPositions) > MAX_POSITIONS:
                     # 1. Read raw performance file and sort by group (sector+direction)
                     performances = readPerformances(self.market + '-rawperf-' + str(asofPrevDate) + '.txt')

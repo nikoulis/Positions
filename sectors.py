@@ -1,7 +1,5 @@
-import urllib2
 import requests
 from bs4 import BeautifulSoup
-from pprint import pprint
 import codecs             # For saving utf8 characters in company names (e.g. Estee Lauder)
 import re                 # Regular expressions, for use in Beautiful Soup matching
 import sys
@@ -26,18 +24,32 @@ def getMarketCapNum(marketCap):
     else:
         return ''
 
-#---------------------------
-# Get data from an href tag
-#---------------------------
+#---------------------------------
+# Get market cap from an href tag
+#---------------------------------
+def getMarketCap(tag, element='span'):
+    result = ''
+    if tag != None:
+        tag = tag.parent
+        if tag != None:
+            tag = tag.parent
+            if tag != None:
+                tag = tag.findNextSibling()
+                if tag.contents != []:
+                    result = tag.contents[0]
+    return result
+
+#------------------------
+# Get sector or industry
+#------------------------
 def getData(tag, element='span'):
     result = ''
     if tag != None:
         tag = tag.parent
         if tag != None:
-            tag = tag.parent.find(element)
-            if tag != None:
-                if tag.contents != []:
-                    result = tag.contents[0]
+            tag = tag.findNextSibling()
+            if tag.contents != []:
+                result = tag.contents[0]
     return result
 
 #------------------------------------------------
@@ -74,14 +86,13 @@ def getYahooFinanceData(symbol):
     # Get name and market cap
     url = 'http://finance.yahoo.com/quote/' + symbol + '/key-statistics?ltr=1'
     page = requests.get(url)
-    soup = BeautifulSoup(page.text)
-    pdb.set_trace()
+    soup = BeautifulSoup(page.text, 'lxml')
     tag = soup.find(text=re.compile('Market Cap'))
-    marketCap = getData(tag)
-    tag = soup.findAll('h2')
+    marketCap = getMarketCap(tag)
+    tag = soup.findAll('h1')
     name = ''
     if tag != []:
-        tag = tag[2]
+        tag = tag[0]
         if tag != None:
             tag = tag.contents
             if tag != []:
@@ -91,12 +102,12 @@ def getYahooFinanceData(symbol):
     name = name.strip()
 
     # Get sector and industry
-    url = 'http://finance.yahoo.com/q/in?s=' + symbol + '+Industry'
+    url = 'http://finance.yahoo.com/q/in?s=' + symbol + '?p=' + symbol
     page = requests.get(url)
-    soup = BeautifulSoup(page.text)
-    tag = soup.find(text=re.compile('Sector:'))
+    soup = BeautifulSoup(page.text, 'lxml')
+    tag = soup.find(text=re.compile('Sector'))
     sector = getData(tag, 'a')
-    tag = soup.find(text='Industry:')
+    tag = soup.find(text='Industry')
     industry = getData(tag, 'a')
 
     return name, sector, industry, marketCap
@@ -105,9 +116,17 @@ def getYahooFinanceData(symbol):
 # Get name, sector, industry and market cap for a list of companies
 #-------------------------------------------------------------------
 if __name__ == '__main__':
+
+    if len(sys.argv) < 2:
+        print 'Usage: %s <filename>' % sys.argv[0]
+        sys.exit()
+        
     filename = sys.argv[1]
     f = codecs.open(filename, 'r', 'utf-8')
-    out = codecs.open('allsectors-missing.txt', 'w', 'utf-8')
+
+    CREATE_OUTPUT_FILE = False
+    if CREATE_OUTPUT_FILE:
+        out = codecs.open('allsectors-test.txt', 'w', 'utf-8')
 
     i = 1
     for line in f:
@@ -115,7 +134,9 @@ if __name__ == '__main__':
         symbol = data[0].strip()
         name, sector, industry, marketCap = getYahooFinanceData(symbol)
 
-        print i
-        #print str(i) + ': ' + symbol  + '|' + str(name.encode('utf-8')) + '|' + sector + '|' + industry + '|' + marketCap
-        out.write(symbol  + '|' + name + '|' + sector + '|' + industry + '|' + marketCap + '\n')
+        if CREATE_OUTPUT_FILE:
+            print 'Running #%d (%s)' % (i, symbol)
+            out.write(symbol  + '|' + name + '|' + sector + '|' + industry + '|' + marketCap + '\n')
+        else:
+            print '%s|%s|%s|%s|%s' % (symbol, str(name.encode('utf-8')), sector, industry, marketCap)
         i += 1

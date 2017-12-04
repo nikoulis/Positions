@@ -28,19 +28,24 @@ if __name__ == '__main__':
     
     # Exclude symbols in foreign markets, or without sectors, or without market caps,
     # or where market cap < $5bn (for the US portfolio only)
+    minMarketCap = 25000
     sectorSymbols = [s for s in stockInfoHash.keys()
                      if (s.find('.') == -1 or getMarket(market) == 'LSE') and
                      stockInfoHash[s].sector != '' and 
-                     (stockInfoHash[s].marketCapNum > 25000 or getMarket(market) == 'LSE')]
+                     (stockInfoHash[s].marketCapNum > minMarketCap or getMarket(market) == 'LSE')]
 
     # Delete _0 from symbols so that the below filter works
     for p in benchmarkPortfolio.positions:
         p.symbol = p.symbol[:p.symbol.find('_0')]
 
-    # Select only positions that pass the above conditions
+    # Select only positions that meet the above conditions
     benchmarkPortfolio.positions = [p for p in benchmarkPortfolio.positions if p.symbol in sectorSymbols]
-    
-    # Add back _0 to symbols so that the calcSectorPercent works
+
+    # Show positions that meet the above conditions
+    for p in benchmarkPortfolio.positions:
+        print str(p)
+                    
+    # Add back _0 to symbols so that the calcSectorPercent below works
     for p in benchmarkPortfolio.positions:
         p.symbol = p.symbol + '_0'
     

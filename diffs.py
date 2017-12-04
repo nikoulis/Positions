@@ -731,7 +731,7 @@ class Portfolio:
     #---------------------------
     def showStats(self, stockInfoHash):
         sectorPositions, sectorPercent = calcSectorPercent(self, stockInfoHash)
-
+        
         print('----------------------------------------------')
         print '              Sector:  Nlng Nshrt  Plng  Pshrt'
         print('----------------------------------------------')

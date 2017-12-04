@@ -1,3 +1,5 @@
+# -*- coding: utf-8 -*-
+
 import requests
 from bs4 import BeautifulSoup
 import codecs             # For saving utf8 characters in company names (e.g. Estee Lauder)
@@ -35,8 +37,11 @@ def getMarketCap(tag, element='span'):
             tag = tag.parent
             if tag != None:
                 tag = tag.findNextSibling()
-                if tag.contents != []:
-                    result = tag.contents[0]
+                if tag == None:
+                    result = '0B'
+                else:
+                    if tag.contents != []:
+                        result = tag.contents[0]
     return result
 
 #------------------------
@@ -48,8 +53,11 @@ def getData(tag, element='span'):
         tag = tag.parent
         if tag != None:
             tag = tag.findNextSibling()
-            if tag.contents != []:
-                result = tag.contents[0]
+            if tag == None:
+                result = ''
+            else:
+                if tag.contents != []:
+                    result = tag.contents[0]
     return result
 
 #------------------------------------------------
@@ -124,9 +132,9 @@ if __name__ == '__main__':
     filename = sys.argv[1]
     f = codecs.open(filename, 'r', 'utf-8')
 
-    CREATE_OUTPUT_FILE = False
+    CREATE_OUTPUT_FILE = True
     if CREATE_OUTPUT_FILE:
-        out = codecs.open('allsectors-test.txt', 'w', 'utf-8')
+        out = codecs.open('sectors-%s' % filename, 'w', 'utf-8')
 
     i = 1
     for line in f:
@@ -137,6 +145,7 @@ if __name__ == '__main__':
         if CREATE_OUTPUT_FILE:
             print 'Running #%d (%s)' % (i, symbol)
             out.write(symbol  + '|' + name + '|' + sector + '|' + industry + '|' + marketCap + '\n')
+            out.flush()
         else:
-            print '%s|%s|%s|%s|%s' % (symbol, str(name.encode('utf-8')), sector, industry, marketCap)
+            print '%s|%s|%s|%s|%s' % (symbol, name, sector, industry, marketCap)
         i += 1

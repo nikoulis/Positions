@@ -481,6 +481,19 @@ class Portfolio:
         if display:
             self.showStats(stockInfoHash)
 
+    #---------------------------
+    # Fit data in correct index
+    #---------------------------
+    def makeIndexed(self, data, index, symbol):
+        # This removes duplicate dates (e.g. for COH on 20171030)
+        dataClean = data.groupby(data.index).first()
+        
+        # Fit data into correct index (in case of missing dates)
+        dataIndexed = pd.DataFrame(index=index)
+        dataIndexed[symbol] = dataClean[symbol]
+            
+        return dataIndexed
+    
     #----------------------------------
     # Download prices from Yahoo Finance
     #----------------------------------
@@ -489,7 +502,7 @@ class Portfolio:
         pricesAdjCloseFilename = 'adjclose-prices-' + self.market + '.csv'
         pricesCloseFilename = 'close-prices-' + self.market + '.csv'
 
-        dataSource = 'google'
+        dataSource = 'yahoo'
         
         i = 0
         symbols = []
@@ -504,48 +517,57 @@ class Portfolio:
             except IOError, e:
                 print e
             print allData.tail(10)
-
+            
             # Get open prices
-            tsOpen = allData['Open']
             try:
+                tsOpen = allData['Open']
                 dataOpen = pd.DataFrame(list(tsOpen.values), index=tsOpen.index, columns=[symbol])
-            except ValueError:
+            except:
                 dataOpen = pd.DataFrame([1] * len(dataOpen.index),
                                         index=dataOpen.index, columns=[symbol])
+
+            normalizedSymbol = normalizeSymbol(symbol)
+            
             if i == 0:
                 pricesOpen = dataOpen
             else:
+                if len(dataOpen) != len(pricesOpen):
+                    dataOpen = self.makeIndexed(dataOpen, pricesOpen.index, normalizedSymbol)
                 pricesOpen = pd.concat([pricesOpen, dataOpen], axis=1)
             pricesOpen = pricesOpen.fillna(method='pad')
             print pricesOpen.tail(10)
 
             # Get adjusted close prices
-            if dataSource == 'yahoo':
-                tsAdjClose = allData['Adj Close']
-            elif dataSource == 'google':
-                tsAdjClose = allData['Close']
             try:
+                if dataSource == 'yahoo':
+                    tsAdjClose = allData['Adj Close']
+                elif dataSource == 'google':
+                    tsAdjClose = allData['Close']
                 dataAdjClose = pd.DataFrame(list(tsAdjClose.values), index=tsAdjClose.index, columns=[symbol])
-            except ValueError:
+            except:
                 dataAdjClose = pd.DataFrame([1] * len(dataAdjClose.index),
                                             index=dataAdjClose.index, columns=[symbol])
             if i == 0:
                 pricesAdjClose = dataAdjClose
             else:
+                if len(dataAdjClose) != len(pricesAdjClose):
+                    dataAdjClose = self.makeIndexed(dataAdjClose, pricesAdjClose.index, normalizedSymbol)
                 pricesAdjClose = pd.concat([pricesAdjClose, dataAdjClose], axis=1)
             pricesAdjClose = pricesAdjClose.fillna(method='pad')
             print pricesAdjClose.tail(10)
 
             # Get unadjusted close prices
-            tsClose = allData['Close']
             try:
+                tsClose = allData['Close']
                 dataClose = pd.DataFrame(list(tsClose.values), index=tsClose.index, columns=[symbol])
-            except ValueError:
+            except:
                 dataClose = pd.DataFrame([1] * len(dataClose.index),
                                          index=dataClose.index, columns=[symbol])   
             if i == 0:
                 pricesClose = dataClose
             else:
+                if len(dataClose) != len(pricesClose):
+                    dataClose = self.makeIndexed(dataClose, pricesClose.index, normalizedSymbol)
                 pricesClose = pd.concat([pricesClose, dataClose], axis=1)
             pricesClose = pricesClose.fillna(method='pad')
             print pricesClose.tail(10)
@@ -995,8 +1017,13 @@ def getMarket(market):
 #------------------
 # Read sector file
 #------------------
-def readSectorFile(market):
-    filename = 'sectors-' + getMarket(market) + '.txt'
+def readSectorFile(market, asofDate=''):
+    if asofDate == '':
+        # Called normally from simulate.py
+        filename = 'sectors-%s.txt' % getMarket(market)
+    else:
+        # Called from create-sample.py
+        filename = 'sectors-%s-%s.csv' % (getMarket(market), asofDate)
     f = open(filename)
     stockInfoHash = {}
     for line in f:

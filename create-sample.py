@@ -5,7 +5,7 @@ import random
 
 if __name__ == '__main__':
     if len(sys.argv) < 2:
-        print 'Usage: create-sample.py <US/LSE> <yyyymmmdd>'
+        print 'Usage: create-sample.py <US/LSE> [<yyyymmmdd>]'
         sys.exit()
 
     market = sys.argv[1]
@@ -16,20 +16,34 @@ if __name__ == '__main__':
         dates = getDates(market)
         asofDate = dates[-1]
 
-    NUM_SAMPLE_POSITIONS = 400
+    NUM_SAMPLE_POSITIONS = 200
 
     # Read benchmark portfolio
     benchmarkPortfolio = Portfolio(market)
     benchmarkPortfolio.readCsv(getMarket(market) + '-' + str(asofDate) + '.csv')
+    stockInfoHash = readSectorFile(getMarket(market), asofDate)
 
+    # Show initial sector percentages
+    benchmarkPortfolio.showStats(stockInfoHash)
+    
     # Exclude symbols in foreign markets, or without sectors, or without market caps,
     # or where market cap < $5bn (for the US portfolio only)
-    stockInfoHash = readSectorFile(getMarket(market))
     sectorSymbols = [s for s in stockInfoHash.keys()
                      if (s.find('.') == -1 or getMarket(market) == 'LSE') and
                      stockInfoHash[s].sector != '' and 
-                     (stockInfoHash[s].marketCapNum > 5000 or getMarket(market) == 'LSE')]
+                     (stockInfoHash[s].marketCapNum > 25000 or getMarket(market) == 'LSE')]
+
+    # Delete _0 from symbols so that the below filter works
+    for p in benchmarkPortfolio.positions:
+        p.symbol = p.symbol[:p.symbol.find('_0')]
+
+    # Select only positions that pass the above conditions
     benchmarkPortfolio.positions = [p for p in benchmarkPortfolio.positions if p.symbol in sectorSymbols]
+    
+    # Add back _0 to symbols so that the calcSectorPercent works
+    for p in benchmarkPortfolio.positions:
+        p.symbol = p.symbol + '_0'
+    
     # Calculate sector percentages and sample accordingly
     benchmarkSectorPositions, benchmarkSectorPercent = calcSectorPercent(benchmarkPortfolio, stockInfoHash)
     benchmarkPortfolio.showStats(stockInfoHash)
@@ -52,9 +66,7 @@ if __name__ == '__main__':
                     print str(position)
                 samplePortfolio.positions.extend(samplePositions)
     print
-    benchmarkPortfolio.showStats(stockInfoHash)
-    print
     samplePortfolio.showStats(stockInfoHash)
 
     # Save portfolio to file for future reference
-    samplePortfolio.writeCsv(market + '-sample.csv')
+    samplePortfolio.writeCsv(market + '-sample-test.csv')

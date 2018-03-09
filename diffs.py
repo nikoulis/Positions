@@ -531,9 +531,9 @@ class Portfolio:
             if i == 0:
                 pricesOpen = dataOpen
             else:
-                if len(dataOpen) != len(pricesOpen):
-                    dataOpen = self.makeIndexed(dataOpen, pricesOpen.index, normalizedSymbol)
+                dataOpen = self.makeIndexed(dataOpen, pricesOpen.index, normalizedSymbol)
                 pricesOpen = pd.concat([pricesOpen, dataOpen], axis=1)
+                
             pricesOpen = pricesOpen.fillna(method='pad')
             print pricesOpen.tail(10)
 
@@ -550,8 +550,7 @@ class Portfolio:
             if i == 0:
                 pricesAdjClose = dataAdjClose
             else:
-                if len(dataAdjClose) != len(pricesAdjClose):
-                    dataAdjClose = self.makeIndexed(dataAdjClose, pricesAdjClose.index, normalizedSymbol)
+                dataAdjClose = self.makeIndexed(dataAdjClose, pricesAdjClose.index, normalizedSymbol)
                 pricesAdjClose = pd.concat([pricesAdjClose, dataAdjClose], axis=1)
             pricesAdjClose = pricesAdjClose.fillna(method='pad')
             print pricesAdjClose.tail(10)
@@ -566,8 +565,7 @@ class Portfolio:
             if i == 0:
                 pricesClose = dataClose
             else:
-                if len(dataClose) != len(pricesClose):
-                    dataClose = self.makeIndexed(dataClose, pricesClose.index, normalizedSymbol)
+                dataClose = self.makeIndexed(dataClose, pricesClose.index, normalizedSymbol)
                 pricesClose = pd.concat([pricesClose, dataClose], axis=1)
             pricesClose = pricesClose.fillna(method='pad')
             print pricesClose.tail(10)

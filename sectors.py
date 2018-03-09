@@ -42,6 +42,8 @@ def getMarketCap(tag, element='span'):
                 else:
                     if tag.contents != []:
                         result = tag.contents[0]
+    if not isinstance(result, unicode):
+        result = '0B'
     return result
 
 #------------------------

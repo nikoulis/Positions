@@ -514,8 +514,8 @@ class Portfolio:
             symbols.append(symbol)
             try:
                 allData = data.DataReader(normalizeSymbol(symbol), dataSource, datetime(2015, 4, 22), endDate)
-            except IOError, e:
-                print e
+            except:
+                pass
             print allData.tail(10)
             
             # Get open prices

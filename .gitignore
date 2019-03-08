@@ -8,3 +8,5 @@
 *.png
 *.pyc
 *.html
+*.zip
+sendmail.py
